@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, FileAudio, CheckCircle2, Sparkles, X, Mic, Square, Play, Pause, Save, Radio } from 'lucide-react';
+import { Upload, FileAudio, CheckCircle2, Sparkles, X, Mic, Square, Play, Pause, Save, Radio, ShieldCheck, FolderSearch, AlertCircle, CopyCheck } from 'lucide-react';
 import { Track, AudioFormat } from '../types';
-import { saveTrack } from '../services/db';
+import { saveTrack, getAllTracks } from '../services/db';
 
 interface ImportDropzoneProps {
   isOpen: boolean;
@@ -48,8 +48,9 @@ export const ImportDropzone: React.FC<ImportDropzoneProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'files' | 'voice'>('files');
   const [isDragging, setIsDragging] = useState(false);
-  const [importingList, setImportingList] = useState<{ name: string; status: 'pending' | 'done' }[]>([]);
+  const [importingList, setImportingList] = useState<{ name: string; status: 'pending' | 'done' | 'skipped' }[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [summaryMessage, setSummaryMessage] = useState<string | null>(null);
 
   // Voice recording states
   const [isRecording, setIsRecording] = useState(false);
@@ -57,13 +58,13 @@ export const ImportDropzone: React.FC<ImportDropzoneProps> = ({
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
   const [recordedUrl, setRecordedUrl] = useState<string | null>(null);
   const [recordedTitle, setRecordedTitle] = useState('');
-  const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
   const [recordError, setRecordError] = useState<string | null>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const audioPreviewRef = useRef<HTMLAudioElement | null>(null);
+  const folderInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     return () => {
@@ -76,16 +77,26 @@ export const ImportDropzone: React.FC<ImportDropzoneProps> = ({
 
   const processFiles = async (files: FileList | File[]) => {
     setIsProcessing(true);
+    setSummaryMessage(null);
+
     const audioFiles = Array.from(files).filter(
       (f) => f.type.startsWith('audio/') || /\.(flac|wav|mp3|m4a|aac|ogg|alac|dsd)$/i.test(f.name)
     );
 
     if (audioFiles.length === 0) {
       setIsProcessing(false);
+      setSummaryMessage('No valid audio files found in selection.');
       return;
     }
 
+    // Load existing library to detect duplicates
+    const existingTracks = await getAllTracks();
+
     setImportingList(audioFiles.map((f) => ({ name: f.name, status: 'pending' })));
+
+    let addedCount = 0;
+    let skippedCount = 0;
+    const currentBatchTracks: Track[] = [];
 
     for (let i = 0; i < audioFiles.length; i++) {
       const file = audioFiles[i];
@@ -101,11 +112,32 @@ export const ImportDropzone: React.FC<ImportDropzoneProps> = ({
       const isHiRes = ['FLAC', 'WAV', 'ALAC', 'DSD'].includes(format);
       const bitrate = isHiRes ? '24-bit / 96kHz Lossless' : '320 kbps High Quality';
 
-      // Remove extension for clean title
-      const cleanTitle = file.name.replace(/\.[^/.]+$/, '').replace(/_/g, ' ');
+      // Clean title
+      const cleanTitle = file.name.replace(/\.[^/.]+$/, '').replace(/_/g, ' ').trim();
+      const fileSizeMB = Math.round((file.size / (1024 * 1024)) * 10) / 10;
 
-      // Extract accurate duration from audio file metadata
+      // Extract accurate duration
       const realDuration = await extractAudioDuration(file);
+
+      // Check if duplicate exists in DB or current batch
+      const normTitle = cleanTitle.toLowerCase();
+      const isDuplicate = [...existingTracks, ...currentBatchTracks].some((t) => {
+        const existingTitle = t.title.toLowerCase().trim();
+        if (existingTitle === normTitle) {
+          const sameSize = t.fileSizeMB && fileSizeMB && Math.abs(t.fileSizeMB - fileSizeMB) < 0.2;
+          const sameDuration = t.duration && realDuration && Math.abs(t.duration - realDuration) <= 3;
+          return sameSize || sameDuration || (!t.fileSizeMB && !t.duration);
+        }
+        return false;
+      });
+
+      if (isDuplicate) {
+        skippedCount++;
+        setImportingList((prev) =>
+          prev.map((item, idx) => (idx === i ? { ...item, status: 'skipped' } : item))
+        );
+        continue;
+      }
 
       const newTrack: Track = {
         id: `local-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
@@ -118,12 +150,14 @@ export const ImportDropzone: React.FC<ImportDropzoneProps> = ({
         isHiRes,
         addedAt: Date.now(),
         playCount: 0,
-        fileSizeMB: Math.round((file.size / (1024 * 1024)) * 10) / 10,
+        fileSizeMB,
         coverArt: 'linear-gradient(135deg, #0284c7 0%, #6366f1 50%, #a855f7 100%)',
       };
 
       // Save audio blob & metadata into IndexedDB
       await saveTrack(newTrack, file);
+      currentBatchTracks.push(newTrack);
+      addedCount++;
 
       setImportingList((prev) =>
         prev.map((item, idx) => (idx === i ? { ...item, status: 'done' } : item))
@@ -131,7 +165,57 @@ export const ImportDropzone: React.FC<ImportDropzoneProps> = ({
     }
 
     setIsProcessing(false);
-    onImportComplete();
+
+    if (addedCount > 0 && skippedCount > 0) {
+      setSummaryMessage(`Added ${addedCount} new track(s). ${skippedCount} duplicate(s) automatically skipped.`);
+    } else if (addedCount > 0 && skippedCount === 0) {
+      setSummaryMessage(`Successfully imported ${addedCount} new track(s).`);
+    } else if (addedCount === 0 && skippedCount > 0) {
+      setSummaryMessage(`All ${skippedCount} track(s) were already in your library and skipped.`);
+    }
+
+    if (addedCount > 0) {
+      onImportComplete();
+    }
+  };
+
+  // Auto-scan folder using File System Access API or directory input fallback
+  const handleAutoScanFolder = async () => {
+    try {
+      if ('showDirectoryPicker' in window) {
+        const dirHandle = await (window as any).showDirectoryPicker();
+        const files: File[] = [];
+
+        const readDir = async (handle: any) => {
+          for await (const entry of handle.values()) {
+            if (entry.kind === 'file') {
+              const file = await entry.getFile();
+              if (file.type.startsWith('audio/') || /\.(flac|wav|mp3|m4a|aac|ogg|alac|dsd)$/i.test(file.name)) {
+                files.push(file);
+              }
+            } else if (entry.kind === 'directory') {
+              await readDir(entry);
+            }
+          }
+        };
+
+        await readDir(dirHandle);
+        if (files.length > 0) {
+          processFiles(files);
+        } else {
+          setSummaryMessage('No audio files detected in the selected directory.');
+        }
+      } else if (folderInputRef.current) {
+        folderInputRef.current.click();
+      }
+    } catch (err: any) {
+      if (err.name !== 'AbortError') {
+        console.warn('Folder picker failed, falling back to browser folder input:', err);
+        if (folderInputRef.current) {
+          folderInputRef.current.click();
+        }
+      }
+    }
   };
 
   const handleStartRecording = async () => {
@@ -162,7 +246,6 @@ export const ImportDropzone: React.FC<ImportDropzoneProps> = ({
         const url = URL.createObjectURL(blob);
         setRecordedUrl(url);
 
-        // Stop all mic tracks
         stream.getTracks().forEach((track) => track.stop());
       };
 
@@ -196,9 +279,20 @@ export const ImportDropzone: React.FC<ImportDropzoneProps> = ({
     if (!recordedBlob) return;
 
     const dur = Math.max(1, recordingSeconds);
+    const cleanTitle = (recordedTitle || 'Voice Recording').trim();
+
+    // Duplicate check for voice recording
+    const existingTracks = await getAllTracks();
+    const isDup = existingTracks.some((t) => t.title.toLowerCase().trim() === cleanTitle.toLowerCase());
+
+    if (isDup) {
+      setRecordError('A voice note with this title already exists. Please use a unique title.');
+      return;
+    }
+
     const newTrack: Track = {
       id: `voice-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-      title: recordedTitle || 'Voice Recording',
+      title: cleanTitle,
       artist: 'Voice Note',
       album: 'Recorded Notes',
       duration: dur,
@@ -277,12 +371,12 @@ export const ImportDropzone: React.FC<ImportDropzoneProps> = ({
 
         {activeTab === 'files' ? (
           <>
-            {/* Dropzone Box */}
+            {/* Auto Device Scan & Dropzone Box */}
             <div
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
               onDrop={handleDrop}
-              className={`border-2 border-dashed rounded-2xl p-8 text-center space-y-3 transition-all cursor-pointer ${
+              className={`border-2 border-dashed rounded-2xl p-6 text-center space-y-3 transition-all cursor-pointer ${
                 isDragging
                   ? 'border-sky-400 bg-sky-500/10 scale-102'
                   : 'border-white/10 bg-black/40 hover:border-white/20'
@@ -293,20 +387,73 @@ export const ImportDropzone: React.FC<ImportDropzoneProps> = ({
               </div>
               <div>
                 <p className="text-xs font-semibold text-white">Drag & Drop FLAC, WAV, MP3, M4A, or DSD files</p>
-                <p className="text-[10px] text-zinc-400 mt-1">Automatic metadata & duration parsing</p>
+                <p className="text-[10px] text-zinc-400 mt-1">Automatic metadata parsing & duplicate prevention</p>
               </div>
 
-              <label className="inline-block px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-white font-medium text-xs shadow-md cursor-pointer transition-transform active:scale-95">
-                <span>Browse Files</span>
+              <div className="flex items-center justify-center gap-2 pt-1 flex-wrap">
+                {/* Auto Device Music Folder Scanner */}
+                <button
+                  type="button"
+                  onClick={handleAutoScanFolder}
+                  className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-medium text-xs shadow-md flex items-center gap-1.5 transition-transform active:scale-95"
+                  title="Scan Music / Download Folder on Device"
+                >
+                  <FolderSearch className="w-4 h-4 text-indigo-200" />
+                  <span>Auto-Detect Device Music Folder</span>
+                </button>
+
+                {/* Individual File Picker */}
+                <label className="px-3.5 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-white font-medium text-xs shadow-md cursor-pointer transition-transform active:scale-95 inline-flex items-center gap-1.5">
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Browse Files</span>
+                  <input
+                    type="file"
+                    multiple
+                    accept="audio/*,.flac,.wav,.mp3,.m4a,.aac,.ogg,.alac,.dsd"
+                    onChange={(e) => e.target.files && processFiles(e.target.files)}
+                    className="hidden"
+                  />
+                </label>
+
+                {/* Hidden webkitdirectory input for folder fallback */}
                 <input
+                  ref={folderInputRef}
                   type="file"
+                  // @ts-ignore
+                  webkitdirectory=""
+                  directory=""
                   multiple
-                  accept="audio/*,.flac,.wav,.mp3,.m4a,.aac,.ogg,.alac,.dsd"
                   onChange={(e) => e.target.files && processFiles(e.target.files)}
                   className="hidden"
                 />
-              </label>
+              </div>
             </div>
+
+            {/* Duplicate Prevention Badge */}
+            <div className="bg-indigo-500/10 border border-indigo-500/20 p-3 rounded-2xl flex items-center gap-2.5">
+              <CopyCheck className="w-5 h-5 text-indigo-400 flex-shrink-0" />
+              <div className="text-[11px] text-indigo-200">
+                <span className="font-bold text-white block">Smart Duplicate Protection Active</span>
+                Prevents uploading the same audio file twice. Duplicate files are detected and automatically skipped.
+              </div>
+            </div>
+
+            {/* Privacy Notice */}
+            <div className="bg-emerald-500/10 border border-emerald-500/20 p-3 rounded-2xl flex items-center gap-2.5">
+              <ShieldCheck className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+              <div className="text-[11px] text-emerald-200">
+                <span className="font-bold text-white block">100% Local & Secure</span>
+                Direct file access via standard browser APIs. Audio stays safely on your device.
+              </div>
+            </div>
+
+            {/* Summary Message */}
+            {summaryMessage && (
+              <div className="p-3 rounded-2xl bg-sky-500/10 border border-sky-500/20 text-xs text-sky-200 font-medium flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-sky-400 flex-shrink-0" />
+                <span>{summaryMessage}</span>
+              </div>
+            )}
 
             {/* Processing List */}
             {importingList.length > 0 && (
@@ -316,9 +463,15 @@ export const ImportDropzone: React.FC<ImportDropzoneProps> = ({
                   <div key={idx} className="flex items-center justify-between text-zinc-300">
                     <span className="truncate max-w-[280px]">{item.name}</span>
                     {item.status === 'done' ? (
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                      <span className="flex items-center gap-1 text-emerald-400 text-[10px]">
+                        <CheckCircle2 className="w-3.5 h-3.5" /> Added
+                      </span>
+                    ) : item.status === 'skipped' ? (
+                      <span className="flex items-center gap-1 text-amber-400 text-[10px]">
+                        <AlertCircle className="w-3.5 h-3.5" /> Duplicate Skipped
+                      </span>
                     ) : (
-                      <span className="text-[10px] text-sky-400 animate-pulse">Saving...</span>
+                      <span className="text-[10px] text-sky-400 animate-pulse">Processing...</span>
                     )}
                   </div>
                 ))}
@@ -420,4 +573,5 @@ export const ImportDropzone: React.FC<ImportDropzoneProps> = ({
     </div>
   );
 };
+
 
