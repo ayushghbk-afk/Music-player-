@@ -43,19 +43,32 @@ export const BackupSyncCenter: React.FC<BackupSyncCenterProps> = ({
     getStorageStats().then(setStorageStats);
   }, []);
 
+  // Helper for safe JSON fetching
+  const safeFetchJson = async (url: string, options?: RequestInit) => {
+    const res = await fetch(url, options);
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      const text = await res.text();
+      if (text.startsWith('<!') || text.includes('<html')) {
+        throw new Error('Server API endpoint unavailable or returned HTML page.');
+      }
+      throw new Error(`Server returned unexpected response (${res.status}): ${text.substring(0, 100)}`);
+    }
+    return res.json();
+  };
+
   // 1. Generate Cloud Sync Snapshot
   const handleGenerateSyncCode = async () => {
     setIsGenerating(true);
     setStatusMsg(null);
     try {
       const payload = await createFullBackupPayload(settings, eqSettings);
-      const res = await fetch('/api/backup/save', {
+      const data = await safeFetchJson('/api/backup/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
 
-      const data = await res.json();
       if (data.success && data.code) {
         setSyncCode(data.code);
         setStatusMsg({
@@ -80,8 +93,7 @@ export const BackupSyncCenter: React.FC<BackupSyncCenterProps> = ({
 
     try {
       const formattedCode = inputCode.trim().toUpperCase();
-      const res = await fetch(`/api/backup/load/${formattedCode}`);
-      const data = await res.json();
+      const data = await safeFetchJson(`/api/backup/load/${formattedCode}`);
 
       if (data.success && data.backup) {
         const { restoredPlaylists, restoredTracks } = await restoreBackupPayload(data.backup);

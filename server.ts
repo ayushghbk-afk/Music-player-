@@ -79,11 +79,11 @@ async function startServer() {
   });
 
   // Save Backup Snapshot for Cross-Device Sync
-  app.post("/api/backup/save", (req, res) => {
+  const handleBackupSave = (req: express.Request, res: express.Response) => {
     try {
-      const { playlists, favorites, trackMetadata, settings, name } = req.body;
-      if (!playlists && !trackMetadata) {
-        return res.status(400).json({ error: "Invalid backup payload" });
+      const { playlists, favorites, trackMetadata, settings, name } = req.body || {};
+      if (!playlists && !trackMetadata && !favorites) {
+        return res.status(400).json({ error: "Invalid or empty backup payload" });
       }
 
       // Generate 6-char alphanumeric code (e.g. AE-8X92)
@@ -102,20 +102,19 @@ async function startServer() {
 
       syncStore.set(code, backup);
 
-      res.json({
+      return res.json({
         success: true,
         code,
         timestamp: backup.timestamp,
         message: "Backup saved to sync cloud. Use this code on any device to restore."
       });
     } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to save backup" });
+      return res.status(500).json({ error: err.message || "Failed to save backup" });
     }
-  });
+  };
 
-  // Load Backup Snapshot by Code
-  app.get("/api/backup/load/:code", (req, res) => {
-    const code = req.params.code.toUpperCase().trim();
+  const handleBackupLoad = (req: express.Request, res: express.Response) => {
+    const code = (req.params.code || "").toUpperCase().trim();
     const backup = syncStore.get(code);
 
     if (!backup) {
@@ -124,9 +123,19 @@ async function startServer() {
       });
     }
 
-    res.json({
+    return res.json({
       success: true,
       backup
+    });
+  };
+
+  app.post(["/api/backup/save", "/api/sync/save", "/api/backup/create", "/api/sync/create"], handleBackupSave);
+  app.get(["/api/backup/load/:code", "/api/sync/load/:code", "/api/backup/:code", "/api/sync/:code"], handleBackupLoad);
+
+  // Catch-all API handler: Ensure ANY route starting with /api/ returns JSON and NEVER HTML
+  app.all("/api/*", (req, res) => {
+    res.status(404).json({
+      error: `API endpoint ${req.method} ${req.path} not found.`
     });
   });
 
