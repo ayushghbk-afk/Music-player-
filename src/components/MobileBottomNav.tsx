@@ -44,7 +44,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   ];
 
   return (
-    <nav className="md:hidden fixed bottom-0 left-0 right-0 h-14 z-40 bg-zinc-950/95 backdrop-blur-2xl border-t border-white/10 px-1 flex items-center justify-around select-none">
+    <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-zinc-950/95 backdrop-blur-2xl border-t border-white/10 px-1 pt-1 pb-[calc(0.25rem+env(safe-area-inset-bottom,0px))] flex items-center justify-around select-none">
       {items.map((item) => {
         const Icon = item.icon;
         const isActive = currentView === item.id;
@@ -52,7 +52,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
           <button
             key={item.id}
             onClick={() => onSelectView(item.id)}
-            className={`flex flex-col items-center justify-center py-1.5 px-2 rounded-xl transition-all relative min-w-[52px] ${
+            className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-all relative min-w-[52px] min-h-[44px] active:scale-95 ${
               isActive ? 'text-indigo-400 font-bold' : 'text-zinc-500 hover:text-zinc-300'
             }`}
           >
@@ -64,7 +64,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
                 </span>
               )}
             </div>
-            <span className="text-[10px] mt-1 tracking-tight">{item.label}</span>
+            <span className="text-[10px] mt-0.5 tracking-tight">{item.label}</span>
             {isActive && (
               <span className="w-1 h-1 bg-indigo-500 rounded-full mt-0.5 shadow-[0_0_6px_rgba(99,102,241,1)]" />
             )}

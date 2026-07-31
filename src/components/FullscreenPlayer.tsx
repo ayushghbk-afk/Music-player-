@@ -91,7 +91,7 @@ export const FullscreenPlayer: React.FC<FullscreenPlayerProps> = ({
   ];
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-3xl flex flex-col justify-between p-4 sm:p-6 overflow-y-auto select-none animate-fadeIn">
+    <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-3xl flex flex-col justify-between pt-[calc(1rem+env(safe-area-inset-top,0px))] pb-[calc(1rem+env(safe-area-inset-bottom,0px))] px-[calc(1rem+env(safe-area-inset-left,0px))] sm:p-6 overflow-y-auto select-none animate-fadeIn">
       {/* Background Ambient Glow */}
       <div
         className="absolute inset-0 opacity-20 pointer-events-none filter blur-3xl scale-125 transition-all duration-1000"

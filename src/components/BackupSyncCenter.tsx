@@ -10,7 +10,6 @@ import {
   Sparkles,
   ArrowRight,
   ShieldCheck,
-  Smartphone
 } from 'lucide-react';
 import { PlayerSettings, EQSettings, BackupPayload } from '../types';
 import { createFullBackupPayload, restoreBackupPayload, getStorageStats } from '../services/db';
@@ -19,14 +18,12 @@ interface BackupSyncCenterProps {
   settings: PlayerSettings;
   eqSettings: EQSettings;
   onRefreshData: () => void;
-  onOpenApkModal?: () => void;
 }
 
 export const BackupSyncCenter: React.FC<BackupSyncCenterProps> = ({
   settings,
   eqSettings,
   onRefreshData,
-  onOpenApkModal,
 }) => {
   const [syncCode, setSyncCode] = useState<string | null>(null);
   const [inputCode, setInputCode] = useState('');
@@ -175,36 +172,6 @@ export const BackupSyncCenter: React.FC<BackupSyncCenterProps> = ({
         </p>
       </div>
 
-      {/* Android APK Banner */}
-      <div className="bg-gradient-to-r from-emerald-950/80 via-teal-950/60 to-zinc-950 p-5 rounded-3xl border border-emerald-500/30 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-lg shadow-emerald-900/10">
-        <div className="flex items-center gap-3">
-          <div className="p-3 bg-emerald-500/20 border border-emerald-500/30 rounded-2xl text-emerald-400 flex-shrink-0">
-            <Smartphone className="w-6 h-6 animate-pulse" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h3 className="text-sm font-bold text-white">Android APK & Native Mobile App</h3>
-              <span className="px-2 py-0.5 rounded text-[9px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                RECOMMENDED
-              </span>
-            </div>
-            <p className="text-xs text-zinc-300">
-              Install directly as an Android WebAPK or convert to a downloadable .APK package with full offline & lockscreen media controls.
-            </p>
-          </div>
-        </div>
-
-        {onOpenApkModal && (
-          <button
-            onClick={onOpenApkModal}
-            className="w-full sm:w-auto px-5 py-2.5 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 transition-all flex-shrink-0 active:scale-95"
-          >
-            <Smartphone className="w-4 h-4" />
-            <span>INSTALL / DOWNLOAD APK</span>
-          </button>
-        )}
-      </div>
-
       {/* Status Alert Banner */}
       {statusMsg && (
         <div
@@ -226,7 +193,7 @@ export const BackupSyncCenter: React.FC<BackupSyncCenterProps> = ({
         <div className="bg-zinc-900/60 p-6 rounded-3xl border border-white/5 space-y-4 flex flex-col justify-between">
           <div className="space-y-2">
             <div className="flex items-center gap-2 text-sky-400 font-bold text-xs uppercase tracking-wider">
-              <Smartphone className="w-4 h-4" />
+              <Cloud className="w-4 h-4" />
               1. Cloud Sync Snapshot
             </div>
             <h3 className="text-base font-bold text-white">Generate Sync Code</h3>

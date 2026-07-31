@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Sliders, Menu, ChevronLeft, ChevronRight, Smartphone } from 'lucide-react';
+import { Sliders, Menu, ChevronLeft, ChevronRight } from 'lucide-react';
 import {
   Track,
   Playlist,
@@ -37,7 +37,6 @@ import { TrackTagEditor } from './components/TrackTagEditor';
 import { ImportDropzone } from './components/ImportDropzone';
 import { MobileBottomNav } from './components/MobileBottomNav';
 import { AiAssistantView } from './components/AiAssistantView';
-import { AndroidApkModal } from './components/AndroidApkModal';
 
 const DEFAULT_EQ: EQSettings = {
   enabled: true,
@@ -83,36 +82,11 @@ export default function App() {
   const [isFullscreenOpen, setIsFullscreenOpen] = useState(false);
   const [isEQModalOpen, setIsEQModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
-  const [isApkModalOpen, setIsApkModalOpen] = useState(false);
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [editingTrack, setEditingTrack] = useState<Track | null>(null);
 
   const [eqSettings, setEqSettings] = useState<EQSettings>(DEFAULT_EQ);
   const [playerSettings, setPlayerSettings] = useState<PlayerSettings>(DEFAULT_SETTINGS);
   const [storageUsedMB, setStorageUsedMB] = useState(0);
-
-  // Capture PWA / WebAPK install prompt
-  useEffect(() => {
-    const handleBeforeInstallPrompt = (e: Event) => {
-      e.preventDefault();
-      setDeferredPrompt(e);
-    };
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    return () => {
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    };
-  }, []);
-
-  const handleTriggerPwaInstall = async () => {
-    if (deferredPrompt) {
-      deferredPrompt.prompt();
-      const choiceResult = await deferredPrompt.userChoice;
-      if (choiceResult.outcome === 'accepted') {
-        console.log('[Aether Audio] WebAPK / PWA installed on Android!');
-      }
-      setDeferredPrompt(null);
-    }
-  };
 
   // Claim exclusive audio focus on app mount to pause/duck background apps & voices
   useEffect(() => {
@@ -380,7 +354,7 @@ export default function App() {
       </div>
 
       {/* Top Bar Header */}
-      <header className="h-14 flex items-center justify-between px-3 sm:px-6 bg-black/40 border-b border-white/5 backdrop-blur-md z-20 flex-shrink-0 gap-2">
+      <header className="min-h-14 pt-[env(safe-area-inset-top,0px)] flex items-center justify-between px-3 sm:px-6 bg-black/40 border-b border-white/5 backdrop-blur-md z-20 flex-shrink-0 gap-2">
         <div className="flex items-center gap-2 sm:gap-4 min-w-0">
           <button
             onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
@@ -418,14 +392,6 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
-          <button
-            onClick={() => setIsApkModalOpen(true)}
-            className="px-2.5 py-1 rounded-full text-[11px] font-mono font-bold flex items-center gap-1.5 transition-all bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-500/30 shadow-[0_0_12px_rgba(16,185,129,0.25)]"
-            title="Android APK & Native Mobile App Center"
-          >
-            <Smartphone className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-            <span>GET APK</span>
-          </button>
           <button
             onClick={() => setIsEQModalOpen(true)}
             className={`px-2.5 py-1 rounded-full text-[11px] font-mono font-bold flex items-center gap-1.5 transition-all border ${
@@ -475,11 +441,10 @@ export default function App() {
             setKV('playerSettings', updated);
           }}
           onTriggerImport={() => setIsImportModalOpen(true)}
-          onOpenApkModal={() => setIsApkModalOpen(true)}
         />
 
         {/* Right Content Scrollable Stage */}
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 pb-36 md:pb-6">
+        <main className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 pb-[calc(9rem+env(safe-area-inset-bottom,0px))] md:pb-6">
           {currentView === 'songs' && (
             <div className="space-y-4">
               <div>
@@ -583,7 +548,6 @@ export default function App() {
               settings={playerSettings}
               eqSettings={eqSettings}
               onRefreshData={loadLibrary}
-              onOpenApkModal={() => setIsApkModalOpen(true)}
             />
           )}
         </main>
@@ -699,14 +663,6 @@ export default function App() {
         isOpen={isImportModalOpen}
         onClose={() => setIsImportModalOpen(false)}
         onImportComplete={loadLibrary}
-      />
-
-      {/* Android APK & Mobile App Center Modal */}
-      <AndroidApkModal
-        isOpen={isApkModalOpen}
-        onClose={() => setIsApkModalOpen(false)}
-        deferredPrompt={deferredPrompt}
-        onTriggerPwaInstall={handleTriggerPwaInstall}
       />
 
       {/* Mobile Sticky Bottom Navigation Bar */}

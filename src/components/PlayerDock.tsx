@@ -79,7 +79,7 @@ export const PlayerDock: React.FC<PlayerDockProps> = ({
   return (
     <>
       {/* Mobile Sticky Mini Player */}
-      <div className="md:hidden fixed bottom-14 left-0 right-0 z-30 bg-zinc-950/95 border-t border-white/10 backdrop-blur-2xl px-3 py-2 h-14 flex items-center justify-between shadow-2xl select-none">
+      <div className="md:hidden fixed bottom-[calc(3.5rem+env(safe-area-inset-bottom,0px))] left-0 right-0 z-30 bg-zinc-950/95 border-t border-white/10 backdrop-blur-2xl px-3 py-2 h-14 flex items-center justify-between shadow-2xl select-none">
         {/* Progress Bar Top Edge */}
         <div
           className="absolute top-0 left-0 right-0 h-1 bg-white/10 cursor-pointer"

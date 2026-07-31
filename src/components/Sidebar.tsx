@@ -15,7 +15,6 @@ import {
   Bot,
   ChevronLeft,
   ChevronRight,
-  Smartphone
 } from 'lucide-react';
 import { ThemeOption } from '../types';
 
@@ -39,7 +38,6 @@ interface SidebarProps {
   theme: ThemeOption;
   onSelectTheme: (theme: ThemeOption) => void;
   onTriggerImport: () => void;
-  onOpenApkModal?: () => void;
   eqEnabled?: boolean;
   isCollapsed?: boolean;
   onToggleCollapse?: () => void;
@@ -55,7 +53,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   theme,
   onSelectTheme,
   onTriggerImport,
-  onOpenApkModal,
   eqEnabled,
   isCollapsed = false,
   onToggleCollapse,
@@ -155,32 +152,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
           )}
         </div>
 
-        {/* Quick Action Buttons */}
-        <div className="space-y-2">
-          <button
-            onClick={onTriggerImport}
-            className={`w-full rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-medium text-xs flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/20 transition-all duration-200 active:scale-[0.98] ${
-              isCollapsed ? 'p-2.5' : 'py-2.5 px-3'
-            }`}
-            title="Import Local Music"
-          >
-            <Upload className="w-4 h-4 flex-shrink-0" />
-            {!isCollapsed && <span>Import Music</span>}
-          </button>
-
-          {onOpenApkModal && (
-            <button
-              onClick={onOpenApkModal}
-              className={`w-full rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-medium text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 transition-all duration-200 active:scale-[0.98] border border-emerald-400/30 ${
-                isCollapsed ? 'p-2.5' : 'py-2 px-3'
-              }`}
-              title="Install Android APK / App"
-            >
-              <Smartphone className="w-4 h-4 flex-shrink-0 text-emerald-200" />
-              {!isCollapsed && <span className="truncate">Install Android APK</span>}
-            </button>
-          )}
-        </div>
+        {/* Quick Import Button */}
+        <button
+          onClick={onTriggerImport}
+          className={`w-full rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-medium text-xs flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/20 transition-all duration-200 active:scale-[0.98] ${
+            isCollapsed ? 'p-2.5' : 'py-2.5 px-3'
+          }`}
+          title="Import Local Music"
+        >
+          <Upload className="w-4 h-4 flex-shrink-0" />
+          {!isCollapsed && <span>Import Music</span>}
+        </button>
 
         {/* Main Navigation */}
         <div className="space-y-1 w-full">
