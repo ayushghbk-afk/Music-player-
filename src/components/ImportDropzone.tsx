@@ -179,8 +179,125 @@ export const ImportDropzone: React.FC<ImportDropzoneProps> = ({
     }
   };
 
-  // Auto-scan folder using File System Access API or directory input fallback
-  const handleAutoScanFolder = async () => {
+  // Create a clean sample WAV blob for demo testing
+  const createSampleAudioBlob = (frequency = 440, durationSec = 10): Blob => {
+    const sampleRate = 44100;
+    const numSamples = sampleRate * durationSec;
+    const buffer = new Float32Array(numSamples);
+
+    for (let i = 0; i < numSamples; i++) {
+      const t = i / sampleRate;
+      // Soft gentle tone with harmonic overtone
+      buffer[i] = Math.sin(2 * Math.PI * frequency * t) * 0.3 * Math.exp(-t * 0.1) +
+                  Math.sin(2 * Math.PI * (frequency * 1.5) * t) * 0.1;
+    }
+
+    // Convert Float32Array to 16-bit PCM WAV
+    const wavBuffer = new ArrayBuffer(44 + numSamples * 2);
+    const view = new DataView(wavBuffer);
+
+    // RIFF identifier
+    const writeString = (offset: number, str: string) => {
+      for (let i = 0; i < str.length; i++) {
+        view.setUint8(offset + i, str.charCodeAt(i));
+      }
+    };
+
+    writeString(0, 'RIFF');
+    view.setUint32(4, 36 + numSamples * 2, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true); // Subchunk1Size (16 for PCM)
+    view.setUint16(20, 1, true); // AudioFormat (1 for PCM)
+    view.setUint16(22, 1, true); // NumChannels (1)
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true); // ByteRate
+    view.setUint16(32, 2, true); // BlockAlign
+    view.setUint16(34, 16, true); // BitsPerSample
+    writeString(36, 'data');
+    view.setUint32(40, numSamples * 2, true);
+
+    // Write PCM samples
+    let offset = 44;
+    for (let i = 0; i < numSamples; i++) {
+      const s = Math.max(-1, Math.min(1, buffer[i]));
+      view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+      offset += 2;
+    }
+
+    return new Blob([view], { type: 'audio/wav' });
+  };
+
+  const handleImportDemoTracks = async () => {
+    setIsProcessing(true);
+    setSummaryMessage(null);
+
+    const demoTracks = [
+      { name: 'Aether Resonance (24-bit Hi-Res).wav', freq: 432, dur: 12, title: 'Aether Resonance', artist: 'Aether Studio', album: 'Audiophile Demos', isHiRes: true },
+      { name: 'Celestial Horizon (FLAC Lossless).wav', freq: 528, dur: 15, title: 'Celestial Horizon', artist: 'Zenith Audio', album: 'Lossless Collection', isHiRes: true },
+      { name: 'Acoustic Drift (Studio Master).wav', freq: 320, dur: 10, title: 'Acoustic Drift', artist: 'Ethereal Sound', album: 'Studio Master', isHiRes: true },
+    ];
+
+    const existingTracks = await getAllTracks();
+    setImportingList(demoTracks.map((d) => ({ name: d.name, status: 'pending' })));
+
+    let addedCount = 0;
+    let skippedCount = 0;
+
+    for (let i = 0; i < demoTracks.length; i++) {
+      const demo = demoTracks[i];
+      const normTitle = demo.title.toLowerCase().trim();
+
+      const isDup = existingTracks.some((t) => t.title.toLowerCase().trim() === normTitle);
+
+      if (isDup) {
+        skippedCount++;
+        setImportingList((prev) =>
+          prev.map((item, idx) => (idx === i ? { ...item, status: 'skipped' } : item))
+        );
+        continue;
+      }
+
+      const audioBlob = createSampleAudioBlob(demo.freq, demo.dur);
+      const newTrack: Track = {
+        id: `demo-${Date.now()}-${i}`,
+        title: demo.title,
+        artist: demo.artist,
+        album: demo.album,
+        duration: demo.dur,
+        format: 'FLAC',
+        bitrate: '24-bit / 96kHz Lossless',
+        isHiRes: true,
+        addedAt: Date.now(),
+        playCount: 0,
+        fileSizeMB: 2.4,
+        coverArt: 'linear-gradient(135deg, #0284c7 0%, #6366f1 50%, #a855f7 100%)',
+      };
+
+      await saveTrack(newTrack, audioBlob);
+      addedCount++;
+      setImportingList((prev) =>
+        prev.map((item, idx) => (idx === i ? { ...item, status: 'done' } : item))
+      );
+    }
+
+    setIsProcessing(false);
+
+    if (addedCount > 0 && skippedCount > 0) {
+      setSummaryMessage(`Imported ${addedCount} sample tracks. ${skippedCount} duplicate(s) skipped.`);
+    } else if (addedCount > 0 && skippedCount === 0) {
+      setSummaryMessage(`Successfully loaded ${addedCount} sample high-res tracks!`);
+    } else {
+      setSummaryMessage(`Sample tracks are already in your library.`);
+    }
+
+    if (addedCount > 0) {
+      onImportComplete();
+    }
+  };
+
+  // Direct Directory Picker handler
+  const handleDirectoryPickerClick = async () => {
     try {
       if ('showDirectoryPicker' in window) {
         const dirHandle = await (window as any).showDirectoryPicker();
@@ -203,17 +320,12 @@ export const ImportDropzone: React.FC<ImportDropzoneProps> = ({
         if (files.length > 0) {
           processFiles(files);
         } else {
-          setSummaryMessage('No audio files detected in the selected directory.');
+          setSummaryMessage('No audio files detected in the selected folder.');
         }
-      } else if (folderInputRef.current) {
-        folderInputRef.current.click();
       }
     } catch (err: any) {
       if (err.name !== 'AbortError') {
-        console.warn('Folder picker failed, falling back to browser folder input:', err);
-        if (folderInputRef.current) {
-          folderInputRef.current.click();
-        }
+        console.warn('Folder picker failed or cancelled:', err);
       }
     }
   };
@@ -391,21 +503,38 @@ export const ImportDropzone: React.FC<ImportDropzoneProps> = ({
               </div>
 
               <div className="flex items-center justify-center gap-2 pt-1 flex-wrap">
-                {/* Auto Device Music Folder Scanner */}
-                <button
-                  type="button"
-                  onClick={handleAutoScanFolder}
-                  className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-medium text-xs shadow-md flex items-center gap-1.5 transition-transform active:scale-95"
-                  title="Scan Music / Download Folder on Device"
-                >
+                {/* Direct Folder Import Label (Works natively on both desktop & mobile browsers) */}
+                <label className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-medium text-xs shadow-md flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer">
                   <FolderSearch className="w-4 h-4 text-indigo-200" />
-                  <span>Auto-Detect Device Music Folder</span>
-                </button>
+                  <span>Scan Device Music Folder</span>
+                  <input
+                    type="file"
+                    // @ts-ignore
+                    webkitdirectory=""
+                    directory=""
+                    multiple
+                    onChange={(e) => e.target.files && processFiles(e.target.files)}
+                    className="hidden"
+                  />
+                </label>
+
+                {/* Desktop Native Directory Picker if available */}
+                {'showDirectoryPicker' in window && (
+                  <button
+                    type="button"
+                    onClick={handleDirectoryPickerClick}
+                    className="px-3.5 py-2 rounded-xl bg-purple-600/80 hover:bg-purple-500 text-white font-medium text-xs shadow-md flex items-center gap-1.5 transition-transform active:scale-95"
+                    title="Select folder using System Directory Picker"
+                  >
+                    <FolderSearch className="w-4 h-4 text-purple-200" />
+                    <span>Choose Directory</span>
+                  </button>
+                )}
 
                 {/* Individual File Picker */}
                 <label className="px-3.5 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-white font-medium text-xs shadow-md cursor-pointer transition-transform active:scale-95 inline-flex items-center gap-1.5">
                   <Upload className="w-3.5 h-3.5" />
-                  <span>Browse Files</span>
+                  <span>Select Files</span>
                   <input
                     type="file"
                     multiple
@@ -415,17 +544,16 @@ export const ImportDropzone: React.FC<ImportDropzoneProps> = ({
                   />
                 </label>
 
-                {/* Hidden webkitdirectory input for folder fallback */}
-                <input
-                  ref={folderInputRef}
-                  type="file"
-                  // @ts-ignore
-                  webkitdirectory=""
-                  directory=""
-                  multiple
-                  onChange={(e) => e.target.files && processFiles(e.target.files)}
-                  className="hidden"
-                />
+                {/* Demo Audiophile Tracks Loader */}
+                <button
+                  type="button"
+                  onClick={handleImportDemoTracks}
+                  className="px-3.5 py-2 rounded-xl bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/30 font-medium text-xs shadow-md flex items-center gap-1.5 transition-transform active:scale-95"
+                  title="Load sample hi-res audio tracks for testing"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Load Sample Demo Songs</span>
+                </button>
               </div>
             </div>
 

@@ -13,7 +13,8 @@ import {
   Plus,
   Music,
   Disc,
-  Clock
+  Clock,
+  X,
 } from 'lucide-react';
 import { Track, AudioFormat } from '../types';
 
@@ -53,10 +54,10 @@ export const SongList: React.FC<SongListProps> = ({
     if (hiResOnlyFilter && !t.isHiRes) return false;
     if (selectedFormat !== 'all' && t.format !== selectedFormat) return false;
     if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      const matchTitle = t.title.toLowerCase().includes(q);
-      const matchArtist = t.artist.toLowerCase().includes(q);
-      const matchAlbum = t.album.toLowerCase().includes(q);
+      const q = searchQuery.toLowerCase().trim();
+      const matchTitle = (t.title || '').toLowerCase().includes(q);
+      const matchArtist = (t.artist || '').toLowerCase().includes(q);
+      const matchAlbum = (t.album || '').toLowerCase().includes(q);
       return matchTitle || matchArtist || matchAlbum;
     }
     return true;
@@ -65,11 +66,11 @@ export const SongList: React.FC<SongListProps> = ({
   // Sort logic
   const sortedTracks = [...filteredTracks].sort((a, b) => {
     let result = 0;
-    if (sortBy === 'title') result = a.title.localeCompare(b.title);
-    else if (sortBy === 'artist') result = a.artist.localeCompare(b.artist);
-    else if (sortBy === 'duration') result = a.duration - b.duration;
+    if (sortBy === 'title') result = (a.title || '').localeCompare(b.title || '');
+    else if (sortBy === 'artist') result = (a.artist || '').localeCompare(b.artist || '');
+    else if (sortBy === 'duration') result = (a.duration || 0) - (b.duration || 0);
     else if (sortBy === 'bitrate') result = (b.isHiRes ? 1 : 0) - (a.isHiRes ? 1 : 0);
-    else result = a.addedAt - b.addedAt;
+    else result = (a.addedAt || 0) - (b.addedAt || 0);
 
     return sortOrder === 'asc' ? result : -result;
   });
@@ -85,16 +86,33 @@ export const SongList: React.FC<SongListProps> = ({
       {/* Top Filter & Search Bar */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-zinc-900/60 p-3 rounded-2xl border border-white/5">
         {/* Search Input */}
-        <div className="relative w-full sm:w-72">
+        <div className="relative w-full sm:w-80">
           <Search className="w-4 h-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
-            placeholder="Search tracks, artists, albums..."
+            placeholder="Search tracks, artists, or albums..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-black/40 border border-white/10 rounded-xl pl-9 pr-3 py-1.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-sky-500 transition-colors"
+            className="w-full bg-black/40 border border-white/10 rounded-xl pl-9 pr-8 py-1.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-sky-500 transition-colors"
           />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white p-1 rounded-full transition-colors"
+              title="Clear search"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
+
+        {/* Search & Filter Stats Badge */}
+        {(searchQuery || selectedFormat !== 'all') && (
+          <div className="text-[11px] font-mono text-zinc-400 flex items-center gap-1.5 px-2.5 py-1 bg-sky-500/10 border border-sky-500/20 rounded-xl">
+            <span className="w-1.5 h-1.5 bg-sky-400 rounded-full animate-pulse" />
+            <span>Showing {sortedTracks.length} of {tracks.length} tracks</span>
+          </div>
+        )}
 
         {/* Format & Sort Selectors */}
         <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
@@ -103,7 +121,7 @@ export const SongList: React.FC<SongListProps> = ({
             <select
               value={selectedFormat}
               onChange={(e) => setSelectedFormat(e.target.value)}
-              className="bg-transparent text-zinc-300 font-medium focus:outline-none cursor-pointer"
+              className="bg-transparent text-zinc-300 font-medium focus:outline-none cursor-pointer text-xs"
             >
               <option value="all" className="bg-zinc-900 text-white">All Formats</option>
               <option value="FLAC" className="bg-zinc-900 text-white">FLAC Lossless</option>
@@ -119,7 +137,7 @@ export const SongList: React.FC<SongListProps> = ({
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as any)}
-              className="bg-transparent text-zinc-300 font-medium focus:outline-none cursor-pointer"
+              className="bg-transparent text-zinc-300 font-medium focus:outline-none cursor-pointer text-xs"
             >
               <option value="added" className="bg-zinc-900 text-white">Date Added</option>
               <option value="title" className="bg-zinc-900 text-white">Title</option>
@@ -142,10 +160,22 @@ export const SongList: React.FC<SongListProps> = ({
         {sortedTracks.length === 0 ? (
           <div className="py-16 text-center space-y-3">
             <Music className="w-10 h-10 text-zinc-600 mx-auto" />
-            <h3 className="text-sm font-semibold text-zinc-300">No tracks match your criteria</h3>
+            <h3 className="text-sm font-semibold text-zinc-300">
+              {searchQuery ? `No tracks matching "${searchQuery}"` : 'No tracks match your criteria'}
+            </h3>
             <p className="text-xs text-zinc-500 max-w-sm mx-auto">
-              Import local audio files or adjust your search filter to display songs in your offline vault.
+              {searchQuery
+                ? 'Try searching by a different song title, artist name, or album.'
+                : 'Import local audio files or adjust your search filter to display songs in your offline vault.'}
             </p>
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="mt-2 px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white text-xs font-medium rounded-xl transition-colors"
+              >
+                Clear Search Filter
+              </button>
+            )}
           </div>
         ) : (
           <>
