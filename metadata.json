@@ -1,5 +1,4 @@
 {
-  "name": "Remix Aether Hi-Res Audio Player",
   "description": "An audiophile offline music player with dark mode, hi-res audio playback, gapless audio engine, Web Audio visualizer, Media Session lock screen controls, and native Android APK / PWA support.",
   "requestFramePermissions": [],
   "majorCapabilities": [
