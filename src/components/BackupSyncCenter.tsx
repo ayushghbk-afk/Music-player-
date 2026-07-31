@@ -10,9 +10,49 @@ import {
   Sparkles,
   ArrowRight,
   ShieldCheck,
+  Server,
+  Globe,
+  Wifi,
+  Smartphone,
+  Settings2,
 } from 'lucide-react';
 import { PlayerSettings, EQSettings, BackupPayload } from '../types';
 import { createFullBackupPayload, restoreBackupPayload, getStorageStats } from '../services/db';
+
+const DEFAULT_CLOUD_SERVER = 'https://ais-dev-esfjibewomgnfxgajfkbio-885223882928.asia-southeast1.run.app';
+
+// Detect if running inside an APK, WebView, or local file environment
+const isLocalOrApkEnv = (): boolean => {
+  if (typeof window === 'undefined' || !window.location) return true;
+  const origin = window.location.origin || '';
+  const protocol = window.location.protocol || '';
+  return (
+    protocol === 'file:' ||
+    protocol === 'capacitor:' ||
+    protocol === 'ionic:' ||
+    origin.includes('localhost') ||
+    origin.includes('127.0.0.1') ||
+    origin.includes('10.0.2.2')
+  );
+};
+
+// Auto-resolve active Cloud Sync Server base URL
+const resolveServerUrl = (customUrl?: string): string => {
+  if (customUrl && customUrl.trim().length > 0) {
+    return customUrl.trim().replace(/\/+$/, '');
+  }
+  const saved = localStorage.getItem('aether_sync_server_url');
+  if (saved && saved.trim().length > 0) {
+    return saved.trim().replace(/\/+$/, '');
+  }
+  if (!isLocalOrApkEnv() && window.location.origin) {
+    try {
+      localStorage.setItem('aether_sync_server_url', window.location.origin);
+    } catch {}
+    return window.location.origin.replace(/\/+$/, '');
+  }
+  return DEFAULT_CLOUD_SERVER;
+};
 
 interface BackupSyncCenterProps {
   settings: PlayerSettings;
@@ -39,18 +79,71 @@ export const BackupSyncCenter: React.FC<BackupSyncCenterProps> = ({
     playlistCount: number;
   }>({ usedMB: 0, trackCount: 0, playlistCount: 0 });
 
+  // Server Host Config State for APK Support
+  const [serverUrl, setServerUrl] = useState<string>(() => resolveServerUrl());
+  const [showServerConfig, setShowServerConfig] = useState(false);
+  const [isTestingServer, setIsTestingServer] = useState(false);
+  const [isApk] = useState<boolean>(() => isLocalOrApkEnv());
+
   React.useEffect(() => {
     getStorageStats().then(setStorageStats);
   }, []);
 
-  // Helper for safe JSON fetching
-  const safeFetchJson = async (url: string, options?: RequestInit) => {
-    const res = await fetch(url, options);
+  const handleUpdateServerUrl = (newUrl: string) => {
+    setServerUrl(newUrl);
+    try {
+      localStorage.setItem('aether_sync_server_url', newUrl.trim());
+    } catch {}
+  };
+
+  const handleTestServerConnection = async () => {
+    setIsTestingServer(true);
+    const targetUrl = resolveServerUrl(serverUrl);
+    try {
+      const res = await fetch(`${targetUrl}/api/health`, {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+      });
+      const data = await res.json();
+      if (data && data.status === 'ok') {
+        setStatusMsg({
+          type: 'success',
+          text: `Connected successfully to Cloud Sync Server! (${targetUrl})`,
+        });
+      } else {
+        throw new Error('Server responded but health check failed.');
+      }
+    } catch (err: any) {
+      setStatusMsg({
+        type: 'error',
+        text: `Connection failed to ${targetUrl}. Please verify your internet connection or URL.`,
+      });
+    } finally {
+      setIsTestingServer(false);
+    }
+  };
+
+  // Helper for safe JSON fetching with automatic server URL resolution for APKs
+  const safeFetchJson = async (endpointPath: string, options?: RequestInit) => {
+    const targetBase = resolveServerUrl(serverUrl);
+    const fullUrl = endpointPath.startsWith('http')
+      ? endpointPath
+      : `${targetBase}${endpointPath.startsWith('/') ? '' : '/'}${endpointPath}`;
+
+    let res: Response;
+    try {
+      res = await fetch(fullUrl, options);
+    } catch (networkErr: any) {
+      throw new Error(
+        `Unable to connect to Cloud Sync Server at ${targetBase}. In APK / Mobile mode, ensure internet access is active.`
+      );
+    }
+
     const contentType = res.headers.get('content-type') || '';
     if (!contentType.includes('application/json')) {
       const text = await res.text();
       if (text.startsWith('<!') || text.includes('<html')) {
-        throw new Error('Server API endpoint unavailable or returned HTML page.');
+        throw new Error(`Server endpoint ${endpointPath} unavailable or returned HTML.`);
       }
       throw new Error(`Server returned unexpected response (${res.status}): ${text.substring(0, 100)}`);
     }
@@ -73,7 +166,7 @@ export const BackupSyncCenter: React.FC<BackupSyncCenterProps> = ({
         setSyncCode(data.code);
         setStatusMsg({
           type: 'success',
-          text: `Sync code created! Use code ${data.code} on your other device to sync your playlists and library.`,
+          text: `Sync code created! Use code ${data.code} on your mobile APK or other device to sync your playlists and library.`,
         });
       } else {
         throw new Error(data.error || 'Failed to generate sync code');
@@ -180,8 +273,78 @@ export const BackupSyncCenter: React.FC<BackupSyncCenterProps> = ({
           Cross-Device Sync & Backup Center
         </h2>
         <p className="text-xs text-zinc-400">
-          Sync your playlists, track metadata, favorites, and studio equalizer presets seamlessly across devices.
+          Sync your playlists, track metadata, favorites, and studio equalizer presets seamlessly across mobile APK apps and web links.
         </p>
+      </div>
+
+      {/* Cloud Server Endpoint Info & APK Config Bar */}
+      <div className="bg-zinc-900/80 p-4 rounded-2xl border border-white/10 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Server className="w-4 h-4 text-sky-400" />
+            <span className="text-xs font-bold text-white">Cloud Sync Server:</span>
+            <span className="text-xs font-mono text-zinc-300 bg-black/40 px-2.5 py-1 rounded-lg border border-white/5 truncate max-w-[240px] sm:max-w-[360px]">
+              {resolveServerUrl(serverUrl)}
+            </span>
+            {isApk ? (
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/20 flex items-center gap-1">
+                <Smartphone className="w-3 h-3" /> Mobile APK Mode
+              </span>
+            ) : (
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 flex items-center gap-1">
+                <Globe className="w-3 h-3" /> Web Link Mode
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleTestServerConnection}
+              disabled={isTestingServer}
+              className="px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs font-medium text-white flex items-center gap-1.5 border border-white/10 disabled:opacity-50"
+              title="Test API Health Connection"
+            >
+              {isTestingServer ? <RefreshCw className="w-3.5 h-3.5 animate-spin text-sky-400" /> : <Wifi className="w-3.5 h-3.5 text-emerald-400" />}
+              <span>Test Connection</span>
+            </button>
+
+            <button
+              onClick={() => setShowServerConfig(!showServerConfig)}
+              className="px-2.5 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-300 flex items-center gap-1 border border-white/10"
+              title="Configure Server Endpoint"
+            >
+              <Settings2 className="w-3.5 h-3.5" />
+              <span>{showServerConfig ? 'Close' : 'Config'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Server URL Input Accordion */}
+        {showServerConfig && (
+          <div className="pt-2 border-t border-white/5 space-y-2 animate-fadeIn">
+            <label className="text-[11px] font-medium text-zinc-400 block">
+              Cloud Sync Host URL (For Android APK & Mobile Cross-Device Sync)
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={serverUrl}
+                onChange={(e) => handleUpdateServerUrl(e.target.value)}
+                placeholder="https://your-cloud-app.run.app"
+                className="flex-1 bg-black/60 border border-white/10 rounded-xl px-3 py-1.5 text-xs font-mono text-white focus:outline-none focus:border-sky-500"
+              />
+              <button
+                onClick={() => handleUpdateServerUrl(DEFAULT_CLOUD_SERVER)}
+                className="px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-300 font-medium"
+              >
+                Reset Default
+              </button>
+            </div>
+            <p className="text-[10px] text-zinc-500">
+              When installed as an APK app, mobile requests target this Cloud Server to save and retrieve sync codes across web browsers and phones.
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Status Alert Banner */}
