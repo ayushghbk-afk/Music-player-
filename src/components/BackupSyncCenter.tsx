@@ -125,8 +125,36 @@ export const BackupSyncCenter: React.FC<BackupSyncCenterProps> = ({
     } catch {}
   };
 
-  // Helper: Save payload directly to Universal Cloud REST API (100% CORS & Cookie-Free for Mobile APK)
+  // Helper: Save payload directly to Universal Cloud REST APIs (Multi-provider CORS-free for Mobile APK)
   const saveToUniversalCloud = async (payload: BackupPayload): Promise<string | null> => {
+    // Strategy 1: jsonblob.com (Fast, accepts large JSON, 100% CORS header support)
+    try {
+      const blobRes = await fetch('https://jsonblob.com/api/jsonBlob', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (blobRes.ok) {
+        const jsonBlobId = blobRes.headers.get('X-jsonblob-id');
+        const locationHeader = blobRes.headers.get('Location');
+        let blobId = jsonBlobId;
+        if (!blobId && locationHeader) {
+          const parts = locationHeader.split('/');
+          blobId = parts[parts.length - 1];
+        }
+        if (blobId) {
+          return `AE-JB-${blobId}`;
+        }
+      }
+    } catch (err) {
+      console.warn('jsonblob save notice:', err);
+    }
+
+    // Strategy 2: api.restful-api.dev
     try {
       const res = await fetch('https://api.restful-api.dev/objects', {
         method: 'POST',
@@ -143,19 +171,35 @@ export const BackupSyncCenter: React.FC<BackupSyncCenterProps> = ({
         }
       }
     } catch (err) {
-      console.warn('Universal cloud save notice:', err);
+      console.warn('restful-api save notice:', err);
     }
+
     return null;
   };
 
-  // Helper: Load payload directly from Universal Cloud REST API
+  // Helper: Load payload directly from Universal Cloud REST APIs
   const loadFromUniversalCloud = async (rawCode: string): Promise<BackupPayload | null> => {
     try {
-      let cleanId = rawCode.trim();
+      let cleanCode = rawCode.trim();
+
+      // Check if jsonblob ID code: AE-JB-<uuid>
+      if (cleanCode.toUpperCase().startsWith('AE-JB-')) {
+        const blobId = cleanCode.substring(6);
+        const res = await fetch(`https://jsonblob.com/api/jsonBlob/${blobId}`, {
+          headers: { 'Accept': 'application/json' },
+        });
+        if (res.ok) {
+          return await res.json();
+        }
+      }
+
+      // Extract ID if prefix exists
+      let cleanId = cleanCode;
       if (cleanId.toUpperCase().startsWith('AE-')) {
         cleanId = cleanId.substring(3);
       }
 
+      // Check local mapped code
       if (cleanId.length < 10) {
         const mapped = localStorage.getItem(`aether_universal_id_${cleanId.toUpperCase()}`);
         if (mapped) {
@@ -163,10 +207,32 @@ export const BackupSyncCenter: React.FC<BackupSyncCenterProps> = ({
         }
       }
 
-      if (!cleanId || cleanId.length < 10) {
-        return null;
+      if (!cleanId) return null;
+
+      // Try jsonblob if cleanId starts with JB-
+      if (cleanId.toUpperCase().startsWith('JB-')) {
+        const blobId = cleanId.substring(3);
+        const res = await fetch(`https://jsonblob.com/api/jsonBlob/${blobId}`, {
+          headers: { 'Accept': 'application/json' },
+        });
+        if (res.ok) {
+          return await res.json();
+        }
       }
 
+      // Try jsonblob UUID if dash present
+      if (cleanId.includes('-')) {
+        try {
+          const res = await fetch(`https://jsonblob.com/api/jsonBlob/${cleanId}`, {
+            headers: { 'Accept': 'application/json' },
+          });
+          if (res.ok) {
+            return await res.json();
+          }
+        } catch {}
+      }
+
+      // Try restful-api.dev
       const res = await fetch(`https://api.restful-api.dev/objects/${cleanId}`);
       if (res.ok) {
         const json = await res.json();
