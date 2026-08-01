@@ -3,9 +3,13 @@
   "appName": "Aether Hi-Res Audio Player",
   "webDir": "dist",
   "server": {
-    "androidScheme": "https"
+    "androidScheme": "https",
+    "cleartext": true
   },
   "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    },
     "SplashScreen": {
       "launchShowDuration": 1500,
       "backgroundColor": "#050505"

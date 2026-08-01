@@ -19,11 +19,15 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  // Global CORS Middleware for PWABuilder, Bubblewrap, and external mobile APK clients
+  // Global CORS Middleware for PWABuilder, Bubblewrap, Capacitor, and external mobile APK clients
   app.use((req, res, next) => {
-    const origin = req.headers.origin || "*";
-    res.setHeader("Access-Control-Allow-Origin", origin);
-    res.setHeader("Access-Control-Allow-Credentials", "true");
+    const origin = req.headers.origin;
+    if (origin && origin !== "null") {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Access-Control-Allow-Credentials", "true");
+    } else {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+    }
     res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, POST, OPTIONS, PUT, DELETE");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, Accept, Origin");
     res.setHeader("Access-Control-Max-Age", "86400");

@@ -45,20 +45,33 @@ const isLocalOrApkEnv = (): boolean => {
 
 // Auto-resolve active Cloud Sync Server base URL
 const resolveServerUrl = (customUrl?: string): string => {
+  const isApk = isLocalOrApkEnv();
+
   if (customUrl && customUrl.trim().length > 0) {
-    return customUrl.trim().replace(/\/+$/, '');
+    const trimmed = customUrl.trim().replace(/\/+$/, '');
+    if (isApk && trimmed.includes('ais-dev-')) {
+      return SHARED_CLOUD_SERVER;
+    }
+    return trimmed;
   }
+
   const saved = localStorage.getItem('aether_sync_server_url');
   if (saved && saved.trim().length > 0) {
-    return saved.trim().replace(/\/+$/, '');
+    const trimmedSaved = saved.trim().replace(/\/+$/, '');
+    if (isApk && trimmedSaved.includes('ais-dev-')) {
+      return SHARED_CLOUD_SERVER;
+    }
+    return trimmedSaved;
   }
-  if (!isLocalOrApkEnv() && window.location.origin) {
-    try {
-      localStorage.setItem('aether_sync_server_url', window.location.origin);
-    } catch {}
-    return window.location.origin.replace(/\/+$/, '');
+
+  if (!isApk && typeof window !== 'undefined' && window.location && window.location.origin) {
+    const orig = window.location.origin.replace(/\/+$/, '');
+    if (!orig.includes('localhost') && !orig.includes('127.0.0.1') && !orig.includes('file:')) {
+      return orig;
+    }
   }
-  return DEFAULT_CLOUD_SERVER;
+
+  return SHARED_CLOUD_SERVER;
 };
 
 interface BackupSyncCenterProps {
@@ -137,10 +150,12 @@ export const BackupSyncCenter: React.FC<BackupSyncCenterProps> = ({
   // Helper for safe JSON fetching with automatic server URL resolution and failover
   const safeFetchJson = async (endpointPath: string, options?: RequestInit) => {
     const configuredServer = resolveServerUrl(serverUrl);
-    const candidateServers = [
-      configuredServer,
-      configuredServer === SHARED_CLOUD_SERVER ? DEV_CLOUD_SERVER : SHARED_CLOUD_SERVER,
-    ].filter((v, i, a) => a.indexOf(v) === i); // deduplicate
+    const inApkMode = isLocalOrApkEnv();
+
+    // In APK mode, always prioritize SHARED_CLOUD_SERVER (ais-pre) over ephemeral dev servers
+    const candidateServers = inApkMode
+      ? [SHARED_CLOUD_SERVER, configuredServer].filter((v, i, a) => v && a.indexOf(v) === i)
+      : [configuredServer, SHARED_CLOUD_SERVER, DEV_CLOUD_SERVER].filter((v, i, a) => v && a.indexOf(v) === i);
 
     let lastError: Error | null = null;
 
@@ -150,7 +165,12 @@ export const BackupSyncCenter: React.FC<BackupSyncCenterProps> = ({
         : `${currentServer}${endpointPath.startsWith('/') ? '' : '/'}${endpointPath}`;
 
       // Use text/plain for POST requests to avoid Android WebView CORS preflight OPTIONS blocking
-      const fetchOpts: RequestInit = { ...options };
+      const fetchOpts: RequestInit = {
+        mode: 'cors',
+        credentials: 'omit',
+        ...options,
+      };
+
       if (fetchOpts.method === 'POST' && fetchOpts.body) {
         fetchOpts.headers = {
           'Content-Type': 'text/plain;charset=UTF-8',
