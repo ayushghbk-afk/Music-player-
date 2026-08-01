@@ -21,16 +21,21 @@ async function startServer() {
 
   // Global CORS Middleware for PWABuilder, Bubblewrap, and external mobile APK clients
   app.use((req, res, next) => {
-    res.setHeader("Access-Control-Allow-Origin", "*");
+    const origin = req.headers.origin || "*";
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Access-Control-Allow-Credentials", "true");
     res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, POST, OPTIONS, PUT, DELETE");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, Accept, Origin");
+    res.setHeader("Access-Control-Max-Age", "86400");
     if (req.method === "OPTIONS") {
-      return res.sendStatus(200);
+      return res.status(200).end();
     }
     next();
   });
 
   app.use(express.json({ limit: "50mb" }));
+  app.use(express.text({ limit: "50mb", type: ["text/plain", "text/*"] }));
+  app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
   const publicDir = path.join(process.cwd(), "public");
   const distDir = path.join(process.cwd(), "dist");
@@ -81,7 +86,13 @@ async function startServer() {
   // Save Backup Snapshot for Cross-Device Sync
   const handleBackupSave = (req: express.Request, res: express.Response) => {
     try {
-      const { playlists, favorites, trackMetadata, settings, name } = req.body || {};
+      let payload = req.body;
+      if (typeof payload === "string") {
+        try {
+          payload = JSON.parse(payload);
+        } catch {}
+      }
+      const { playlists, favorites, trackMetadata, settings, name } = payload || {};
       if (!playlists && !trackMetadata && !favorites) {
         return res.status(400).json({ error: "Invalid or empty backup payload" });
       }

@@ -111,56 +111,78 @@ export const BackupSyncCenter: React.FC<BackupSyncCenterProps> = ({
 
   const handleTestServerConnection = async () => {
     setIsTestingServer(true);
-    const targetUrl = resolveServerUrl(serverUrl);
+    setStatusMsg(null);
     try {
-      const res = await fetch(`${targetUrl}/api/health`, {
-        method: 'GET',
-        headers: { Accept: 'application/json' },
-      });
-      const data = await res.json();
+      const data = await safeFetchJson('/api/health');
       if (data && data.status === 'ok') {
+        const activeUrl = resolveServerUrl(serverUrl);
         setStatusMsg({
           type: 'success',
-          text: `Connected successfully to Cloud Sync Server! (${targetUrl})`,
+          text: `Connected successfully to Cloud Sync Server! (${activeUrl})`,
         });
       } else {
-        throw new Error('Server responded but health check failed.');
+        throw new Error('Server responded but health check status failed.');
       }
     } catch (err: any) {
+      const targetUrl = resolveServerUrl(serverUrl);
       setStatusMsg({
         type: 'error',
-        text: `Connection failed to ${targetUrl}. Please verify your internet connection or URL.`,
+        text: `Connection failed to ${targetUrl}. ${err.message || 'Please check your connection.'}`,
       });
     } finally {
       setIsTestingServer(false);
     }
   };
 
-  // Helper for safe JSON fetching with automatic server URL resolution
+  // Helper for safe JSON fetching with automatic server URL resolution and failover
   const safeFetchJson = async (endpointPath: string, options?: RequestInit) => {
-    const targetBase = resolveServerUrl(serverUrl);
-    const fullUrl = endpointPath.startsWith('http')
-      ? endpointPath
-      : `${targetBase}${endpointPath.startsWith('/') ? '' : '/'}${endpointPath}`;
+    const configuredServer = resolveServerUrl(serverUrl);
+    const candidateServers = [
+      configuredServer,
+      configuredServer === SHARED_CLOUD_SERVER ? DEV_CLOUD_SERVER : SHARED_CLOUD_SERVER,
+    ].filter((v, i, a) => a.indexOf(v) === i); // deduplicate
 
-    let res: Response;
-    try {
-      res = await fetch(fullUrl, options);
-    } catch (networkErr: any) {
-      throw new Error(
-        `Unable to connect to Cloud Sync Server at ${targetBase}. In APK / Mobile mode, ensure internet access is active.`
-      );
-    }
+    let lastError: Error | null = null;
 
-    const contentType = res.headers.get('content-type') || '';
-    if (!contentType.includes('application/json')) {
-      const text = await res.text();
-      if (text.startsWith('<!') || text.includes('<html')) {
-        throw new Error(`Server endpoint ${endpointPath} unavailable or returned HTML.`);
+    for (const currentServer of candidateServers) {
+      const fullUrl = endpointPath.startsWith('http')
+        ? endpointPath
+        : `${currentServer}${endpointPath.startsWith('/') ? '' : '/'}${endpointPath}`;
+
+      // Use text/plain for POST requests to avoid Android WebView CORS preflight OPTIONS blocking
+      const fetchOpts: RequestInit = { ...options };
+      if (fetchOpts.method === 'POST' && fetchOpts.body) {
+        fetchOpts.headers = {
+          'Content-Type': 'text/plain;charset=UTF-8',
+          ...(fetchOpts.headers || {}),
+        };
       }
-      throw new Error(`Server returned unexpected response (${res.status}): ${text.substring(0, 100)}`);
+
+      try {
+        const res = await fetch(fullUrl, fetchOpts);
+        const contentType = res.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+          const text = await res.text();
+          if (text.startsWith('<!') || text.includes('<html')) {
+            throw new Error(`Server endpoint returned HTML instead of API JSON.`);
+          }
+          throw new Error(`Server returned status ${res.status}: ${text.substring(0, 80)}`);
+        }
+
+        // Auto-switch to working server if primary server candidate failed
+        if (currentServer !== configuredServer) {
+          handleUpdateServerUrl(currentServer);
+        }
+
+        return await res.json();
+      } catch (err: any) {
+        lastError = err;
+      }
     }
-    return res.json();
+
+    throw new Error(
+      lastError?.message || `Unable to connect to Cloud Sync Server. Please check network access or server host.`
+    );
   };
 
   // 1. Generate Cloud Sync Snapshot
