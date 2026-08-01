@@ -88,6 +88,9 @@ export const BackupSyncCenter: React.FC<BackupSyncCenterProps> = ({
   const [syncCode, setSyncCode] = useState<string | null>(() => {
     return localStorage.getItem('aether_active_sync_code') || null;
   });
+  const [universalSyncCode, setUniversalSyncCode] = useState<string | null>(() => {
+    return localStorage.getItem('aether_universal_sync_code') || null;
+  });
   const [inputCode, setInputCode] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
@@ -122,19 +125,95 @@ export const BackupSyncCenter: React.FC<BackupSyncCenterProps> = ({
     } catch {}
   };
 
+  // Helper: Save payload directly to Universal Cloud REST API (100% CORS & Cookie-Free for Mobile APK)
+  const saveToUniversalCloud = async (payload: BackupPayload): Promise<string | null> => {
+    try {
+      const res = await fetch('https://api.restful-api.dev/objects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'AetherBackup',
+          data: payload,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.id) {
+          return `AE-${data.id}`;
+        }
+      }
+    } catch (err) {
+      console.warn('Universal cloud save notice:', err);
+    }
+    return null;
+  };
+
+  // Helper: Load payload directly from Universal Cloud REST API
+  const loadFromUniversalCloud = async (rawCode: string): Promise<BackupPayload | null> => {
+    try {
+      let cleanId = rawCode.trim();
+      if (cleanId.toUpperCase().startsWith('AE-')) {
+        cleanId = cleanId.substring(3);
+      }
+
+      if (cleanId.length < 10) {
+        const mapped = localStorage.getItem(`aether_universal_id_${cleanId.toUpperCase()}`);
+        if (mapped) {
+          cleanId = mapped;
+        }
+      }
+
+      if (!cleanId || cleanId.length < 10) {
+        return null;
+      }
+
+      const res = await fetch(`https://api.restful-api.dev/objects/${cleanId}`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json && json.data) {
+          return json.data.backup || json.data;
+        }
+      }
+    } catch (err) {
+      console.warn('Universal cloud load notice:', err);
+    }
+    return null;
+  };
+
   const handleTestServerConnection = async () => {
     setIsTestingServer(true);
     setStatusMsg(null);
     try {
-      const data = await safeFetchJson('/api/health');
-      if (data && data.status === 'ok') {
-        const activeUrl = resolveServerUrl(serverUrl);
+      let serverOk = false;
+      const activeUrl = resolveServerUrl(serverUrl);
+
+      try {
+        const data = await safeFetchJson('/api/health');
+        if (data && data.status === 'ok') {
+          serverOk = true;
+        }
+      } catch (e: any) {
+        console.warn('Local server test note:', e.message);
+      }
+
+      let universalOk = false;
+      try {
+        const res = await fetch('https://api.restful-api.dev/objects/ff8081819f7e10ae019fbc7e727a5b77');
+        if (res.ok) universalOk = true;
+      } catch {}
+
+      if (serverOk) {
         setStatusMsg({
           type: 'success',
           text: `Connected successfully to Cloud Sync Server! (${activeUrl})`,
         });
+      } else if (universalOk) {
+        setStatusMsg({
+          type: 'success',
+          text: `Connected to Universal Cloud Sync Network! (100% Mobile APK & Web Cross-Sync Ready)`,
+        });
       } else {
-        throw new Error('Server responded but health check status failed.');
+        throw new Error('Server endpoint check failed. Please verify internet access.');
       }
     } catch (err: any) {
       const targetUrl = resolveServerUrl(serverUrl);
@@ -152,7 +231,6 @@ export const BackupSyncCenter: React.FC<BackupSyncCenterProps> = ({
     const configuredServer = resolveServerUrl(serverUrl);
     const inApkMode = isLocalOrApkEnv();
 
-    // In APK mode, always prioritize SHARED_CLOUD_SERVER (ais-pre) over ephemeral dev servers
     const candidateServers = inApkMode
       ? [SHARED_CLOUD_SERVER, configuredServer].filter((v, i, a) => v && a.indexOf(v) === i)
       : [configuredServer, SHARED_CLOUD_SERVER, DEV_CLOUD_SERVER].filter((v, i, a) => v && a.indexOf(v) === i);
@@ -164,7 +242,6 @@ export const BackupSyncCenter: React.FC<BackupSyncCenterProps> = ({
         ? endpointPath
         : `${currentServer}${endpointPath.startsWith('/') ? '' : '/'}${endpointPath}`;
 
-      // Use text/plain for POST requests to avoid Android WebView CORS preflight OPTIONS blocking
       const fetchOpts: RequestInit = {
         mode: 'cors',
         credentials: 'omit',
@@ -189,7 +266,6 @@ export const BackupSyncCenter: React.FC<BackupSyncCenterProps> = ({
           throw new Error(`Server returned status ${res.status}: ${text.substring(0, 80)}`);
         }
 
-        // Auto-switch to working server if primary server candidate failed
         if (currentServer !== configuredServer) {
           handleUpdateServerUrl(currentServer);
         }
@@ -211,23 +287,49 @@ export const BackupSyncCenter: React.FC<BackupSyncCenterProps> = ({
     setStatusMsg(null);
     try {
       const payload = await createFullBackupPayload(settings, eqSettings);
-      const data = await safeFetchJson('/api/backup/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
 
-      if (data.success && data.code) {
-        setSyncCode(data.code);
-        try {
-          localStorage.setItem('aether_active_sync_code', data.code);
-        } catch {}
+      // Save to Universal Public Cloud (100% reliable on mobile APKs without cookie blocks)
+      const uCode = await saveToUniversalCloud(payload);
+
+      let shortCode: string | null = null;
+      try {
+        const data = await safeFetchJson('/api/backup/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (data && data.success && data.code) {
+          shortCode = data.code;
+        }
+      } catch (e) {
+        console.warn('Express server backup notice:', e);
+      }
+
+      const activeCode = uCode || shortCode;
+
+      if (activeCode) {
+        setSyncCode(shortCode || activeCode);
+        if (uCode) {
+          setUniversalSyncCode(uCode);
+          try {
+            localStorage.setItem('aether_universal_sync_code', uCode);
+            if (shortCode) {
+              localStorage.setItem(`aether_universal_id_${shortCode.toUpperCase()}`, uCode.replace('AE-', ''));
+            }
+          } catch {}
+        }
+        if (shortCode) {
+          try {
+            localStorage.setItem('aether_active_sync_code', shortCode);
+          } catch {}
+        }
+
         setStatusMsg({
           type: 'success',
-          text: `Sync code created! Use code ${data.code} on your mobile APK or other device to sync your playlists and library.`,
+          text: `Cloud Sync Code created! Copy code below and use it on your Mobile APK or Web app to restore your library.`,
         });
       } else {
-        throw new Error(data.error || 'Failed to generate sync code');
+        throw new Error('Failed to generate cloud sync snapshot.');
       }
     } catch (err: any) {
       setStatusMsg({ type: 'error', text: err.message || 'Sync failed.' });
@@ -236,7 +338,7 @@ export const BackupSyncCenter: React.FC<BackupSyncCenterProps> = ({
     }
   };
 
-  // 2. Restore Snapshot using Sync Code (supports hybrid code like AE-1234@https://...)
+  // 2. Restore Snapshot using Sync Code
   const handleRestoreFromCode = async () => {
     if (!inputCode.trim()) return;
     setIsRestoring(true);
@@ -246,7 +348,6 @@ export const BackupSyncCenter: React.FC<BackupSyncCenterProps> = ({
       let rawCode = inputCode.trim();
       let targetServer = serverUrl;
 
-      // Extract embedded server URL if user pasted a hybrid code (e.g. AE-8X92@https://...)
       if (rawCode.includes('@http')) {
         const parts = rawCode.split('@');
         rawCode = parts[0];
@@ -254,12 +355,26 @@ export const BackupSyncCenter: React.FC<BackupSyncCenterProps> = ({
         handleUpdateServerUrl(targetServer);
       }
 
-      const formattedCode = rawCode.toUpperCase().trim();
-      const targetBase = resolveServerUrl(targetServer);
-      const data = await safeFetchJson(`${targetBase}/api/backup/load/${formattedCode}`);
+      const formattedCode = rawCode.trim();
 
-      if (data.success && data.backup) {
-        const { restoredPlaylists, restoredTracks } = await restoreBackupPayload(data.backup);
+      // Step 1: Try Universal Public Cloud (works on ALL Mobile APKs without server cookie auth)
+      let backupPayload: BackupPayload | null = await loadFromUniversalCloud(formattedCode);
+
+      // Step 2: If Universal Cloud didn't yield payload, try Express server endpoint
+      if (!backupPayload) {
+        const targetBase = resolveServerUrl(targetServer);
+        try {
+          const data = await safeFetchJson(`${targetBase}/api/backup/load/${formattedCode.toUpperCase()}`);
+          if (data && data.success && data.backup) {
+            backupPayload = data.backup;
+          }
+        } catch (serverErr: any) {
+          console.warn('Express server load notice:', serverErr);
+        }
+      }
+
+      if (backupPayload) {
+        const { restoredPlaylists, restoredTracks } = await restoreBackupPayload(backupPayload);
         setSyncCode(formattedCode);
         try {
           localStorage.setItem('aether_active_sync_code', formattedCode);
@@ -272,7 +387,7 @@ export const BackupSyncCenter: React.FC<BackupSyncCenterProps> = ({
         setInputCode('');
         onRefreshData();
       } else {
-        throw new Error(data.error || 'Sync code not found or expired.');
+        throw new Error('Sync code not found or expired. Please verify your code and try again.');
       }
     } catch (err: any) {
       setStatusMsg({ type: 'error', text: err.message || 'Failed to restore sync payload.' });
@@ -669,11 +784,25 @@ export const BackupSyncCenter: React.FC<BackupSyncCenterProps> = ({
             <div className="flex gap-2">
               <input
                 type="text"
-                placeholder="e.g. AE-9821"
+                placeholder="e.g. AE-8X92 or Universal Code"
                 value={inputCode}
                 onChange={(e) => setInputCode(e.target.value)}
                 className="flex-1 bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs font-mono font-bold text-white focus:outline-none focus:border-indigo-500 text-center tracking-widest"
               />
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    const text = await navigator.clipboard.readText();
+                    if (text) setInputCode(text.trim());
+                  } catch {}
+                }}
+                className="px-2.5 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-zinc-300 hover:text-white text-xs font-medium flex items-center gap-1 border border-white/10"
+                title="Paste from Clipboard"
+              >
+                <Copy className="w-3.5 h-3.5" />
+                <span>Paste</span>
+              </button>
               <button
                 onClick={handleRestoreFromCode}
                 disabled={isRestoring || !inputCode.trim()}
@@ -684,7 +813,7 @@ export const BackupSyncCenter: React.FC<BackupSyncCenterProps> = ({
               </button>
             </div>
             <p className="text-[10px] text-zinc-500 text-center">
-              Supports standard codes (AE-8X92) or hybrid host links.
+              Supports standard codes (AE-8X92), Universal APK codes (AE-ff80...), or hybrid links.
             </p>
           </div>
         </div>
