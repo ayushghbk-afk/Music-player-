@@ -1,4 +1,8 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { App as CapacitorApp } from '@capacitor/app';
+import { Capacitor } from '@capacitor/core';
+import { SplashScreen } from '@capacitor/splash-screen';
+import { StatusBar, Style } from '@capacitor/status-bar';
 import { Sliders, Menu, ChevronLeft, ChevronRight } from 'lucide-react';
 import {
   Track,
@@ -87,6 +91,63 @@ export default function App() {
   const [eqSettings, setEqSettings] = useState<EQSettings>(DEFAULT_EQ);
   const [playerSettings, setPlayerSettings] = useState<PlayerSettings>(DEFAULT_SETTINGS);
   const [storageUsedMB, setStorageUsedMB] = useState(0);
+
+  // Native Android shell polish: black system bars, controlled splash, and stable WebView styling.
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+
+    StatusBar.setStyle({ style: Style.Dark }).catch(() => {});
+    StatusBar.setBackgroundColor({ color: '#050505' }).catch(() => {});
+    StatusBar.setOverlaysWebView({ overlay: false }).catch(() => {});
+    SplashScreen.hide().catch(() => {});
+  }, []);
+
+  // Android hardware back button behavior for a true app feel.
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+
+    let listenerHandle: { remove: () => Promise<void> } | null = null;
+    let isActive = true;
+
+    CapacitorApp.addListener('backButton', ({ canGoBack }) => {
+      if (editingTrack) {
+        setEditingTrack(null);
+        return;
+      }
+      if (isImportModalOpen) {
+        setIsImportModalOpen(false);
+        return;
+      }
+      if (isEQModalOpen) {
+        setIsEQModalOpen(false);
+        return;
+      }
+      if (isFullscreenOpen) {
+        setIsFullscreenOpen(false);
+        return;
+      }
+      if (currentView !== 'songs') {
+        setCurrentView('songs');
+        return;
+      }
+      if (canGoBack) {
+        window.history.back();
+        return;
+      }
+      CapacitorApp.minimizeApp();
+    }).then((handle) => {
+      if (isActive) {
+        listenerHandle = handle;
+      } else {
+        handle.remove();
+      }
+    }).catch(() => {});
+
+    return () => {
+      isActive = false;
+      listenerHandle?.remove();
+    };
+  }, [currentView, editingTrack, isEQModalOpen, isFullscreenOpen, isImportModalOpen]);
 
   // Claim exclusive audio focus on app mount to pause/duck background apps & voices
   useEffect(() => {
