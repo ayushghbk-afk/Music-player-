@@ -2,7 +2,7 @@
   "id": "/",
   "scope": "/",
   "start_url": "/",
-  "name": "Aether Hi-Res Audio Studio",
+  "name": "Aether Hi-Res Audio Player",
   "short_name": "Aether Audio",
   "description": "High-Resolution Audio Player & DSP Engine with Parametric EQ, FLAC Support, Spatial Audio, and Offline Cache.",
   "lang": "en-US",
@@ -68,14 +68,14 @@
       "type": "image/png",
       "sizes": "512x512",
       "form_factor": "narrow",
-      "label": "Aether Audio Mobile Studio"
+      "label": "Aether Audio Mobile Player"
     },
     {
       "src": "/pwa-512.png",
       "type": "image/png",
       "sizes": "512x512",
       "form_factor": "wide",
-      "label": "Aether Audio Desktop Workstation"
+      "label": "Aether Audio Desktop Player"
     }
   ]
 }

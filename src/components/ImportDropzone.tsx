@@ -15,15 +15,22 @@ const extractAudioDuration = (file: File | Blob): Promise<number> => {
     const audio = new Audio();
     audio.preload = 'metadata';
 
-    const timer = setTimeout(() => {
+    const cleanup = () => {
+      audio.pause();
+      audio.removeAttribute('src');
+      audio.load();
       URL.revokeObjectURL(url);
+    };
+
+    const timer = setTimeout(() => {
+      cleanup();
       resolve(180);
     }, 4000);
 
     audio.onloadedmetadata = () => {
       clearTimeout(timer);
       const d = audio.duration;
-      URL.revokeObjectURL(url);
+      cleanup();
       if (d && isFinite(d) && d > 0) {
         resolve(Math.round(d));
       } else {
@@ -33,7 +40,7 @@ const extractAudioDuration = (file: File | Blob): Promise<number> => {
 
     audio.onerror = () => {
       clearTimeout(timer);
-      URL.revokeObjectURL(url);
+      cleanup();
       resolve(180);
     };
 

@@ -6,6 +6,12 @@
     "androidScheme": "https",
     "cleartext": false
   },
+  "android": {
+    "backgroundColor": "#050505",
+    "allowMixedContent": false,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": false
+  },
   "plugins": {
     "CapacitorHttp": {
       "enabled": true

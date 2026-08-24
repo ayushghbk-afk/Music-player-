@@ -892,7 +892,7 @@ export const BackupSyncCenter: React.FC<BackupSyncCenterProps> = ({
           Offline Vault File Export & Import (.aetherjson)
         </h3>
         <p className="text-xs text-zinc-400 leading-relaxed">
-          Export an offline backup file containing your complete library structure, playlists, and equalizer presets for permanent offline storage on your phone or Google Drive.
+          Export an offline backup file containing your complete library structure, playlists, and equalizer presets for permanent offline storage on your phone or cloud drive.
         </p>
 
         <div className="flex flex-col sm:flex-row items-center gap-3 pt-2">

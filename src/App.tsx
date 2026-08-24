@@ -63,6 +63,18 @@ const DEFAULT_SETTINGS: PlayerSettings = {
   autoPlayNext: true,
 };
 
+const revokeTrackAudioUrls = (trackList: Track[]) => {
+  trackList.forEach((track) => {
+    if (track.audioUrl?.startsWith('blob:')) {
+      try {
+        URL.revokeObjectURL(track.audioUrl);
+      } catch {
+        // Best-effort cleanup for older in-memory object URLs.
+      }
+    }
+  });
+};
+
 export default function App() {
   const [tracks, setTracks] = useState<Track[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
@@ -198,7 +210,10 @@ export default function App() {
       existingTracks = await getAllTracks();
     }
 
-    setTracks(existingTracks);
+    setTracks((previousTracks) => {
+      revokeTrackAudioUrls(previousTracks);
+      return existingTracks;
+    });
 
     const loadedPlaylists = await getAllPlaylists();
     setPlaylists(loadedPlaylists);
