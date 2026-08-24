@@ -2,6 +2,11 @@ import { App as CapacitorApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { Track, EQSettings, PlayerSettings } from '../types';
 import { getTrackBlob } from './db';
+import {
+  AetherPlayer,
+  arrayBufferToBase64Chunks,
+  extensionForTrack,
+} from './aetherPlayer';
 
 export const EQ_FREQUENCIES = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
 
@@ -31,6 +36,12 @@ export class AudioEngine {
   private onTrackEndedCallback?: () => void;
   private onTimeUpdateCallback?: (currentTime: number, duration: number) => void;
   private onStateChangeCallback?: (isPlaying: boolean) => void;
+  private nativeListenerAttached = false;
+  private nativePosition = 0;
+  private nativeDuration = 0;
+  private nativePlaying = false;
+  private onNativeNext?: () => void;
+  private onNativePrevious?: () => void;
 
   private constructor() {
     this.audioElement = this.createAudioElement();
@@ -38,6 +49,36 @@ export class AudioEngine {
     this.setupAudioElementEvents();
     this.setupVisibilityHandlers();
     this.setupNativeAppLifecycle();
+    this.setupNativePlayerBridge();
+  }
+
+  private usesNativePlayback() {
+    return Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android';
+  }
+
+  private setupNativePlayerBridge() {
+    if (this.nativeListenerAttached || !this.usesNativePlayback()) return;
+    this.nativeListenerAttached = true;
+
+    AetherPlayer.addListener('playerEvent', (event) => {
+      if (typeof event.currentTime === 'number') this.nativePosition = event.currentTime;
+      if (typeof event.duration === 'number' && event.duration > 0) this.nativeDuration = event.duration;
+
+      if (event.type === 'state') {
+        this.nativePlaying = !!event.isPlaying;
+        this.onStateChangeCallback?.(this.nativePlaying);
+      } else if (event.type === 'time') {
+        this.onTimeUpdateCallback?.(this.nativePosition, this.nativeDuration);
+      } else if (event.type === 'ended') {
+        this.nativePlaying = false;
+        this.onStateChangeCallback?.(false);
+        this.onTrackEndedCallback?.();
+      } else if (event.type === 'next') {
+        this.onNativeNext?.();
+      } else if (event.type === 'previous') {
+        this.onNativePrevious?.();
+      }
+    }).catch(() => {});
   }
 
   private createAudioElement(): HTMLAudioElement {
@@ -129,6 +170,7 @@ export class AudioEngine {
   }
 
   private scheduleBackgroundPlaybackRecovery(immediate = false) {
+    if (this.usesNativePlayback()) return;
     if (!this.shouldResumeAfterInterruption) return;
     if (!this.isBackgrounded()) {
       this.cancelBackgroundPlaybackRecovery();
@@ -461,6 +503,46 @@ export class AudioEngine {
     this.audioElement.src = src;
   }
 
+  private async playTrackNatively(track: Track, audioUrl?: string): Promise<boolean> {
+    if (!this.usesNativePlayback()) return false;
+
+    const meta = {
+      title: track.title,
+      artist: track.artist,
+      album: track.album || 'Aether',
+    };
+
+    const remoteUrl = audioUrl || track.audioUrl;
+    if (remoteUrl && (remoteUrl.startsWith('http://') || remoteUrl.startsWith('https://') || remoteUrl.startsWith('file://') || remoteUrl.startsWith('content://'))) {
+      await AetherPlayer.playUrl({ url: remoteUrl, ...meta });
+      this.nativePlaying = true;
+      this.onStateChangeCallback?.(true);
+      return true;
+    }
+
+    const blob = await getTrackBlob(track.id);
+    if (!blob) return false;
+
+    const buffer = await blob.arrayBuffer();
+    const chunks = arrayBufferToBase64Chunks(buffer);
+    await AetherPlayer.beginCache({
+      trackId: track.id,
+      extension: extensionForTrack(track.format, blob.type),
+    });
+    for (const data of chunks) {
+      await AetherPlayer.appendCache({ data });
+    }
+    await AetherPlayer.playCached(meta);
+    try {
+      window.localStorage.setItem('aether.lastTrackId', track.id);
+    } catch {
+      // ignore quota
+    }
+    this.nativePlaying = true;
+    this.onStateChangeCallback?.(true);
+    return true;
+  }
+
   // Load and play a track with CORS protection and Blob fallback
   public async playTrack(
     track: Track,
@@ -481,6 +563,17 @@ export class AudioEngine {
 
     this.cancelBackgroundPlaybackRecovery();
     this.currentTrack = track;
+
+    try {
+      const usedNative = await this.playTrackNatively(track, audioUrl);
+      if (usedNative) {
+        this.updateMediaSession(track);
+        return;
+      }
+    } catch (err) {
+      console.warn('Native playback unavailable, falling back to WebView audio:', err);
+    }
+
     let urlToPlay = audioUrl || track.audioUrl;
 
     // Fallback: If no URL or invalid, fetch from IndexedDB
@@ -524,6 +617,13 @@ export class AudioEngine {
   }
 
   public play() {
+    if (this.usesNativePlayback()) {
+      AetherPlayer.play().then(() => {
+        this.nativePlaying = true;
+        this.onStateChangeCallback?.(true);
+      }).catch(() => {});
+      return;
+    }
     this.initWebAudio();
     this.shouldResumeAfterInterruption = true;
     this.claimExclusiveAudioFocus();
@@ -531,6 +631,13 @@ export class AudioEngine {
   }
 
   public pause() {
+    if (this.usesNativePlayback()) {
+      AetherPlayer.pause().then(() => {
+        this.nativePlaying = false;
+        this.onStateChangeCallback?.(false);
+      }).catch(() => {});
+      return;
+    }
     this.cancelBackgroundPlaybackRecovery();
     this.shouldResumeAfterInterruption = false;
     this.backgroundAutoPaused = false;
@@ -547,6 +654,11 @@ export class AudioEngine {
   }
 
   public seek(seconds: number) {
+    if (this.usesNativePlayback()) {
+      this.nativePosition = seconds;
+      AetherPlayer.seek({ seconds }).catch(() => {});
+      return;
+    }
     if (!isNaN(seconds) && isFinite(seconds)) {
       const duration = this.audioElement.duration;
       const clamped = isFinite(duration) && duration > 0
@@ -559,10 +671,16 @@ export class AudioEngine {
 
   public setVolume(val: number) {
     const clamped = Math.max(0, Math.min(1, val));
+    if (this.usesNativePlayback()) {
+      AetherPlayer.setVolume({ volume: clamped }).catch(() => {});
+    }
     this.audioElement.volume = clamped;
   }
 
   public setPlaybackRate(rate: number) {
+    if (this.usesNativePlayback()) {
+      AetherPlayer.setPlaybackRate({ rate }).catch(() => {});
+    }
     this.audioElement.playbackRate = rate;
   }
 
@@ -624,7 +742,9 @@ export class AudioEngine {
       ],
     });
 
-    navigator.mediaSession.playbackState = this.audioElement.paused ? 'paused' : 'playing';
+    navigator.mediaSession.playbackState = this.usesNativePlayback()
+      ? (this.nativePlaying ? 'playing' : 'paused')
+      : this.audioElement.paused ? 'paused' : 'playing';
   }
 
   public registerMediaSessionHandlers(handlers: {
@@ -666,6 +786,9 @@ export class AudioEngine {
       stop: () => this.pause(),
     };
 
+    this.onNativeNext = handlers.onNext;
+    this.onNativePrevious = handlers.onPrevious;
+
     Object.entries(actionMap).forEach(([action, handler]) => {
       try {
         if (handler) {
@@ -680,15 +803,15 @@ export class AudioEngine {
   }
 
   public getCurrentTime(): number {
-    return this.audioElement.currentTime || 0;
+    return this.usesNativePlayback() ? this.nativePosition : this.audioElement.currentTime || 0;
   }
 
   public getDuration(): number {
-    return this.audioElement.duration || 0;
+    return this.usesNativePlayback() ? this.nativeDuration : this.audioElement.duration || 0;
   }
 
   public isPaused(): boolean {
-    return this.audioElement.paused;
+    return this.usesNativePlayback() ? !this.nativePlaying : this.audioElement.paused;
   }
 }
 

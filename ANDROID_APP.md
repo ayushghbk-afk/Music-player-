@@ -39,9 +39,15 @@ android/app/build/outputs/apk/debug/app-debug.apk
 npm run android:open
 ```
 
-## Notes
+## Native playback (Media3)
 
-- User music files are imported into the app through the Android file picker and stored locally by the WebView/IndexedDB layer.
-- Voice recording requires the Android microphone permission.
-- The app can be updated over an existing install without deleting local app data as long as the same package ID/signing key is used.
-- For Play Store release builds, create a signed release APK/AAB in Android Studio or add a signing configuration to the Gradle project.
+Android playback is no longer bound to the Capacitor WebView.
+
+- React UI still owns the library, queue, shuffle/repeat, and screens
+- `AetherPlayer` Capacitor plugin writes the selected IndexedDB blob into app cache
+- `PlaybackManager` + ExoPlayer / Media3 plays that file
+- `MusicPlayerService` is a `MediaSessionService` foreground service
+
+That stack is what keeps audio alive when the screen locks, the app is backgrounded, or Bluetooth / notification controls are used. Headphone unplug and audio focus are handled natively.
+
+Web playback is unchanged in the browser.
