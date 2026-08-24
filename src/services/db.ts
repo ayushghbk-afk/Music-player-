@@ -58,23 +58,13 @@ export async function saveTrack(track: Track, blob?: Blob): Promise<void> {
 export async function getAllTracks(): Promise<Track[]> {
   const db = await getDB();
   const rawTracks = await db.getAll('tracks');
-  
-  // Re-attach blob object URLs for local playback
-  const tracksWithUrls = await Promise.all(
-    rawTracks.map(async (t) => {
-      const blob = await db.get('audioBlobs', t.id);
-      let audioUrl = t.audioUrl;
-      if (blob instanceof Blob) {
-        audioUrl = URL.createObjectURL(blob);
-      }
-      return {
-        ...t,
-        audioUrl,
-      } as Track;
-    })
-  );
 
-  return tracksWithUrls;
+  // Important: do not create blob object URLs for the whole library.
+  // Large music libraries can otherwise pin every audio file in memory.
+  // Playback fetches the selected track blob lazily inside audioEngine.
+  return rawTracks
+    .map((track) => ({ ...track, audioUrl: undefined } as Track))
+    .sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
 }
 
 // Get Audio Blob for track

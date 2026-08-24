@@ -91,9 +91,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: 'ai-assistant' as NavView,
-      label: 'AI Audio Engineer',
+      label: 'Sound Assistant',
       icon: Bot,
-      badge: 'AI',
+      badge: 'EQ',
       badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30',
     },
     {

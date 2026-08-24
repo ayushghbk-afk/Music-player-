@@ -37,13 +37,13 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({
   const [sessions, setSessions] = useState<ChatSession[]>(() => [
     {
       id: 'session-default-1',
-      title: 'Studio Sound & EQ Consultant',
+      title: 'Sound & EQ Consultant',
       createdAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       messages: [
         {
           id: 'msg-welcome',
           sender: 'assistant',
-          text: `Welcome to Aether AI Studio Sound Engineer! 🎧\n\nI can help you with:\n• 10-Band Parametric EQ presets tailored for your music genres\n• FLAC/DSD/ALAC audio format comparisons and Bitrate analysis\n• Room acoustics & Spatial Audio tuning tips\n• Track mastering recommendations\n\nHow can I enhance your listening experience today?`,
+          text: `Welcome to Aether Sound Assistant! 🎧\n\nI can help you with:\n• 10-Band Parametric EQ presets tailored for your music genres\n• FLAC/DSD/ALAC audio format comparisons and Bitrate analysis\n• Room acoustics & Spatial Audio tuning tips\n• Track mastering recommendations\n\nHow can I enhance your listening experience today?`,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         },
       ],
@@ -302,7 +302,7 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({
             <div className="flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-amber-400" />
               <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-300">
-                AI Studio Engineer
+                Aether Sound Guide
               </h2>
             </div>
             <button
@@ -374,7 +374,7 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({
             </div>
             <div className="min-w-0">
               <h3 className="text-xs sm:text-sm font-semibold text-white truncate">
-                {currentSession?.title || 'Aether AI Master Engineer'}
+                {currentSession?.title || 'Aether Sound Assistant'}
               </h3>
               <p className="text-[10px] sm:text-[11px] text-zinc-400 truncate">
                 Parametric EQ Optimization • Codec Advisor • Spatial Tuning
@@ -515,7 +515,7 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Ask your AI Sound Engineer (max 2000 chars)..."
+              placeholder="Ask your sound assistant (max 2000 chars)..."
               rows={2}
               className="w-full bg-zinc-900 text-white text-xs p-2.5 sm:p-3 pr-12 rounded-xl border border-white/10 focus:outline-none focus:border-indigo-500 resize-none transition-all placeholder:text-zinc-500"
             />
@@ -532,7 +532,7 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({
           {/* Character counter */}
           <div className="flex items-center justify-between text-[10px] text-zinc-500 font-mono px-1">
             <span className="hidden sm:inline">Press Enter to send, Shift+Enter for newline</span>
-            <span className="sm:hidden text-zinc-500 font-mono">AI Studio Assistant</span>
+            <span className="sm:hidden text-zinc-500 font-mono">Aether Sound Assistant</span>
             <span
               className={
                 inputText.length > 2000
@@ -551,7 +551,7 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({
   );
 };
 
-// Generates intelligent AI Sound Engineer answers
+// Generates intelligent Sound Assistant answers
 function generateAiAudioResponse(
   prompt: string,
   currentTrack: Track | null,
@@ -588,7 +588,7 @@ function generateAiAudioResponse(
 
   if (p.includes('spatial') || p.includes('width') || p.includes('stage')) {
     return {
-      reply: `To widen your soundstage in Aether Audio Studio:\n1. Increase the Stereo Width slider in Studio EQ & FX to ~130%.\n2. Add subtle treble boost (+2dB at 8kHz and 16kHz) to improve spatial cue localization.\n3. Ensure your DAC or output headphones have a flat frequency response.`,
+      reply: `To widen your soundstage in Aether Audio:\n1. Increase the Stereo Width slider in Studio EQ & FX to ~130%.\n2. Add subtle treble boost (+2dB at 8kHz and 16kHz) to improve spatial cue localization.\n3. Ensure your DAC or output headphones have a flat frequency response.`,
     };
   }
 

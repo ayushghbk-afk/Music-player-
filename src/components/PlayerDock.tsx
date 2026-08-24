@@ -79,10 +79,10 @@ export const PlayerDock: React.FC<PlayerDockProps> = ({
   return (
     <>
       {/* Mobile Sticky Mini Player */}
-      <div className="md:hidden fixed bottom-[calc(3.5rem+env(safe-area-inset-bottom,0px))] left-0 right-0 z-30 bg-zinc-950/95 border-t border-white/10 backdrop-blur-2xl px-3 py-2 h-14 flex items-center justify-between shadow-2xl select-none">
+      <div className="md:hidden fixed bottom-[calc(3.9rem+env(safe-area-inset-bottom,0px))] left-2 right-2 z-30 bg-zinc-950/90 border border-white/10 backdrop-blur-2xl px-3 py-2 h-16 flex items-center justify-between shadow-[0_18px_60px_rgba(0,0,0,0.65)] select-none rounded-2xl overflow-hidden">
         {/* Progress Bar Top Edge */}
         <div
-          className="absolute top-0 left-0 right-0 h-1 bg-white/10 cursor-pointer"
+          className="absolute top-0 left-0 right-0 h-1.5 bg-white/10 cursor-pointer"
           onClick={(e) => {
             const rect = e.currentTarget.getBoundingClientRect();
             const clickX = e.clientX - rect.left;
@@ -91,7 +91,7 @@ export const PlayerDock: React.FC<PlayerDockProps> = ({
           }}
         >
           <div
-            className="h-full bg-indigo-500 shadow-[0_0_6px_rgba(99,102,241,0.8)]"
+            className="h-full bg-gradient-to-r from-sky-400 via-indigo-500 to-fuchsia-500 shadow-[0_0_10px_rgba(99,102,241,0.9)]"
             style={{ width: `${progressPercent}%` }}
           />
         </div>
@@ -102,7 +102,7 @@ export const PlayerDock: React.FC<PlayerDockProps> = ({
           className="flex items-center gap-3 min-w-0 flex-1 cursor-pointer pr-2"
         >
           <div
-            className="w-10 h-10 rounded-lg overflow-hidden flex-shrink-0 border border-white/10 shadow-md relative"
+            className="w-11 h-11 rounded-2xl overflow-hidden flex-shrink-0 border border-white/10 shadow-md relative ring-1 ring-white/5"
             style={{
               background: currentTrack?.coverArt?.startsWith('linear')
                 ? currentTrack.coverArt
@@ -139,7 +139,7 @@ export const PlayerDock: React.FC<PlayerDockProps> = ({
           </button>
           <button
             onClick={onPlayPause}
-            className="w-9 h-9 rounded-full bg-white text-black flex items-center justify-center active:scale-90 transition-transform shadow-md"
+            className="w-10 h-10 rounded-full bg-white text-black flex items-center justify-center active:scale-90 transition-transform shadow-[0_0_22px_rgba(255,255,255,0.35)]"
           >
             {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
           </button>
