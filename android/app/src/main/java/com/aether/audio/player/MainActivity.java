@@ -6,11 +6,13 @@ import android.os.Bundle;
 import android.view.Window;
 import android.webkit.WebSettings;
 
+import com.aether.audio.player.playback.MusicPlayerPlugin;
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        registerPlugin(MusicPlayerPlugin.class);
         super.onCreate(savedInstanceState);
 
         Window window = getWindow();
