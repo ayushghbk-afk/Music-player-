@@ -33,12 +33,14 @@ Screen  bar  Controls
 
 ### Native Android Playback
 
-On Android, audio playback is **not** handled by the WebView. The native layer owns the entire playback lifecycle:
+On Android, audio playback is **not** handled by the WebView — and never falls back to it. The native layer is the single source of truth for the entire playback lifecycle:
 
-- **`PlaybackManager`** — Singleton wrapping ExoPlayer with audio focus, wake lock, headset unplug detection, and position persistence
-- **`MusicPlayerService`** — `MediaSessionService` foreground service that keeps audio alive when the app is backgrounded or the screen is locked
-- **`MusicPlayerPlugin`** — Capacitor plugin bridging React commands (play, pause, seek, volume) to the native player
-- **`audioEngine.ts`** — Detects Android via `Capacitor.isNativePlatform()` and routes all playback commands through the native plugin; falls back to web `HTMLAudioElement` in browsers
+- **`PlaybackManager`** — Singleton wrapping ExoPlayer with audio focus, wake lock, headset unplug detection, and position persistence. Playback commands are deferred until the foreground service is alive, guaranteeing the ordering *service → media session → setMediaItem → prepare → play*. The player is owned by the main looper; all plugin access is dispatched to main.
+- **`MusicPlayerService`** — `MediaSessionService` foreground service that keeps audio alive when the app is backgrounded or the screen is locked. `onTaskRemoved()` keeps the service alive while playback is *actively* playing or buffering, and cleanly stops otherwise.
+- **`MusicPlayerPlugin`** — Capacitor plugin bridging React commands (play, pause, seek, volume) to the native player, plus track-store management and a loopback import server
+- **`TrackStore`** — Persistent app-private storage (`filesDir/aether-tracks`) for imported audio; a track is imported once and then streamed from disk forever — never through the JS bridge on the playback path
+- **`LocalTrackServer`** — Loopback-only HTTP server the WebView streams imported files to (raw bytes, no Base64; falls back to chunked plugin imports if unavailable)
+- **`audioEngine.ts`** — Detects Android via `Capacitor.isNativePlatform()` and routes *all* playback commands through the native plugin; native playback state flows back through plugin events. Web `HTMLAudioElement` playback is used in browsers only — on Android a native failure surfaces as an error rather than silently switching engines
 
 ### Web Playback
 
@@ -64,7 +66,7 @@ Source → Preamp → 10-Band EQ → Bass → Treble → Analyser → Master Gai
 
 ### Library
 - Local file import (FLAC, WAV, MP3, AAC, OGG, ALAC)
-- IndexedDB storage for offline playback
+- Offline storage — IndexedDB in the browser, persistent native storage (`filesDir`) on Android
 - Albums view
 - Playlists (create, edit, delete)
 - Favorites

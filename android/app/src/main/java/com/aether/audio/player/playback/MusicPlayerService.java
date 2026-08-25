@@ -24,7 +24,8 @@ public class MusicPlayerService extends MediaSessionService {
         super.onCreate();
         ensureChannel();
 
-        Player player = PlaybackManager.get(this).getPlayer();
+        PlaybackManager manager = PlaybackManager.get(this);
+        Player player = manager.getPlayer();
         Intent sessionIntent = new Intent(this, MainActivity.class);
         PendingIntent pendingIntent = PendingIntent.getActivity(
                 this,
@@ -36,8 +37,12 @@ public class MusicPlayerService extends MediaSessionService {
         mediaSession = new MediaSession.Builder(this, player)
                 .setId("aether-session")
                 .setSessionActivity(pendingIntent)
-                .setCallback(new SessionCallback())
                 .build();
+
+        // The session now exists: any playback command queued by
+        // PlaybackManager.runWhenServiceReady() is released, guaranteeing the
+        // ordering service -> media session -> prepare -> play.
+        manager.onServiceReady();
     }
 
     @Nullable
@@ -52,15 +57,40 @@ public class MusicPlayerService extends MediaSessionService {
             mediaSession.release();
             mediaSession = null;
         }
+        PlaybackManager.get(this).onServiceDestroyed();
         super.onDestroy();
     }
 
+    /**
+     * Decide whether to keep the service alive after the task is swiped away.
+     *
+     * "About to play" is not the same as playWhenReady: ExoPlayer can sit in
+     * STATE_BUFFERING (or be transiently not playing during focus changes)
+     * while playWhenReady is still true. The decision must be based on
+     * *active playback*: actually playing, or buffering with the intent to
+     * play. Only when playback is genuinely inactive do we pause and stop, so
+     * Media3 tears down the notification cleanly.
+     */
     @Override
-    public void onTaskRemoved(Intent rootIntent) {
+    public void onTaskRemoved(@Nullable Intent rootIntent) {
         Player player = mediaSession != null ? mediaSession.getPlayer() : null;
-        if (player == null || !player.getPlayWhenReady() || player.getMediaItemCount() == 0) {
+        if (player == null) {
+            stopSelf();
+            return;
+        }
+
+        boolean activelyPlaying =
+                player.isPlaying()
+                        || (player.getPlayWhenReady()
+                            && player.getPlaybackState() == Player.STATE_BUFFERING
+                            && player.getMediaItemCount() > 0);
+
+        if (!activelyPlaying) {
+            player.pause();
             stopSelf();
         }
+        // Still actively playing: keep the service and its notification. The
+        // user keeps their music — standard behavior for media apps.
     }
 
     private void ensureChannel() {
@@ -75,13 +105,6 @@ public class MusicPlayerService extends MediaSessionService {
         NotificationManager manager = getSystemService(NotificationManager.class);
         if (manager != null) {
             manager.createNotificationChannel(channel);
-        }
-    }
-
-    private static final class SessionCallback implements MediaSession.Callback {
-        @Override
-        public boolean onMediaButtonEvent(MediaSession session, android.content.Intent mediaButtonIntent) {
-            return MediaSession.Callback.super.onMediaButtonEvent(session, mediaButtonIntent);
         }
     }
 }

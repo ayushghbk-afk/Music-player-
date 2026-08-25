@@ -41,12 +41,12 @@ npm run android:open
 
 ## Native playback (Media3)
 
-Android playback is no longer bound to the Capacitor WebView.
+Android playback is no longer bound to the Capacitor WebView — and never falls back to it.
 
 - React UI still owns the library, queue, shuffle/repeat, and screens
-- `AetherPlayer` Capacitor plugin writes the selected IndexedDB blob into app cache
-- `PlaybackManager` + ExoPlayer / Media3 plays that file
-- `MusicPlayerService` is a `MediaSessionService` foreground service
+- Imports stream the audio blob once into **persistent** native storage (`filesDir/aether-tracks`) via the loopback `LocalTrackServer` — raw bytes, no Base64 on the happy path, no IndexedDB audio copy on Android
+- `PlaybackManager` + ExoPlayer / Media3 plays that file; playback commands wait for the foreground service to be alive first
+- `MusicPlayerService` is a `MediaSessionService` foreground service that survives task removal while playback is active
 
 That stack is what keeps audio alive when the screen locks, the app is backgrounded, or Bluetooth / notification controls are used. Headphone unplug and audio focus are handled natively.
 
