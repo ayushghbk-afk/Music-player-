@@ -1,8 +1,13 @@
 import { openDB, IDBPDatabase } from 'idb';
+import { Capacitor } from '@capacitor/core';
 import { Track, Playlist, PlayerSettings, EQSettings, BackupPayload } from '../types';
+import { deleteNativeTrack, extensionForTrack, importTrackToNativeStore } from './aetherPlayer';
 
 const DB_NAME = 'AetherAudioDB';
 const DB_VERSION = 1;
+
+const isAndroidNative = () =>
+  Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android';
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
 
@@ -41,14 +46,31 @@ export function getDB(): Promise<IDBPDatabase> {
 
 // Save or Update Track
 export async function saveTrack(track: Track, blob?: Blob): Promise<void> {
+  // On Android, audio bytes belong in the persistent native track store —
+  // imported once, streamed, and played by ExoPlayer without ever crossing
+  // the JS bridge again. IndexedDB keeps metadata only (and the blob only if
+  // the native import failed, so playback can retry the import later).
+  let nativeStored = false;
+  if (blob && isAndroidNative()) {
+    try {
+      await importTrackToNativeStore(
+        { trackId: track.id, extension: extensionForTrack(track.format, blob.type) },
+        blob
+      );
+      nativeStored = true;
+    } catch (err) {
+      console.warn('Native track import failed; keeping IndexedDB copy as fallback:', err);
+    }
+  }
+
   const db = await getDB();
   const tx = db.transaction(['tracks', 'audioBlobs'], 'readwrite');
-  
+
   // Store track metadata without the ephemeral object URL
   const { audioUrl, ...trackMeta } = track;
   await tx.objectStore('tracks').put(trackMeta);
 
-  if (blob) {
+  if (blob && !nativeStored) {
     await tx.objectStore('audioBlobs').put(blob, track.id);
   }
   await tx.done;
@@ -75,6 +97,10 @@ export async function getTrackBlob(trackId: string): Promise<Blob | undefined> {
 
 // Delete Track
 export async function deleteTrack(trackId: string): Promise<void> {
+  if (isAndroidNative()) {
+    // Best effort: drop the stored audio file alongside the metadata.
+    void deleteNativeTrack(trackId);
+  }
   const db = await getDB();
   const tx = db.transaction(['tracks', 'audioBlobs'], 'readwrite');
   await tx.objectStore('tracks').delete(trackId);

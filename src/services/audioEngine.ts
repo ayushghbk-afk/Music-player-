@@ -1,19 +1,41 @@
-import { App as CapacitorApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { Track, EQSettings, PlayerSettings } from '../types';
 import { getTrackBlob } from './db';
 import {
   AetherPlayer,
-  arrayBufferToBase64Chunks,
   extensionForTrack,
+  importTrackToNativeStore,
+  nativeTrackExists,
 } from './aetherPlayer';
 
 export const EQ_FREQUENCIES = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
 
+export interface AudioEngineCallbacks {
+  onEnded?: () => void;
+  onTimeUpdate?: (currentTime: number, duration: number) => void;
+  onStateChange?: (isPlaying: boolean) => void;
+  onError?: (message: string) => void;
+}
+
+/**
+ * Two engines, strictly separated:
+ *
+ *  - Android: native playback ONLY. ExoPlayer + MediaSessionService own the
+ *    playback state; this class is a thin command/event bridge. There is no
+ *    HTMLAudioElement, no WebView MediaSession, no screen WakeLock and no
+ *    background-recovery JavaScript on this path. If native playback fails we
+ *    surface the error — we never silently fall back to the WebView, because
+ *    WebView audio cannot survive in the background and dual state is how
+ *    desync bugs are born.
+ *
+ *  - Browsers: web playback ONLY (HTMLAudioElement + Web Audio graph), with
+ *    its own background-interruption recovery.
+ */
 export class AudioEngine {
   private static instance: AudioEngine;
 
-  private audioElement: HTMLAudioElement;
+  // ---- Web-only state (lazily created; null on Android) ----------------
+  private audioElement: HTMLAudioElement | null = null;
   private audioCtx: AudioContext | null = null;
   private sourceNode: MediaElementAudioSourceNode | null = null;
   private analyserNode: AnalyserNode | null = null;
@@ -22,20 +44,22 @@ export class AudioEngine {
   private bassFilter: BiquadFilterNode | null = null;
   private trebleFilter: BiquadFilterNode | null = null;
   private masterGainNode: GainNode | null = null;
-
   private isInitialized = false;
-  private currentTrack: Track | null = null;
   private wakeLock: any = null;
   private shouldResumeAfterInterruption = false;
   private backgroundAutoPaused = false;
   private currentObjectUrl: string | null = null;
-  private appLifecycleListenersRegistered = false;
-  private nativeAppIsActive = true;
   private backgroundRecoveryTimer: number | null = null;
   private backgroundRecoveryAttempts = 0;
+
+  // ---- Shared state ----------------------------------------------------
+  private currentTrack: Track | null = null;
   private onTrackEndedCallback?: () => void;
   private onTimeUpdateCallback?: (currentTime: number, duration: number) => void;
   private onStateChangeCallback?: (isPlaying: boolean) => void;
+  private onErrorCallback?: (message: string) => void;
+
+  // ---- Native mirror (display only; ExoPlayer is the source of truth) --
   private nativeListenerAttached = false;
   private nativePosition = 0;
   private nativeDuration = 0;
@@ -44,12 +68,12 @@ export class AudioEngine {
   private onNativePrevious?: () => void;
 
   private constructor() {
-    this.audioElement = this.createAudioElement();
-
-    this.setupAudioElementEvents();
+    if (this.usesNativePlayback()) {
+      // Android: no web audio machinery at all.
+      this.setupNativePlayerBridge();
+      return;
+    }
     this.setupVisibilityHandlers();
-    this.setupNativeAppLifecycle();
-    this.setupNativePlayerBridge();
   }
 
   private usesNativePlayback() {
@@ -77,8 +101,88 @@ export class AudioEngine {
         this.onNativeNext?.();
       } else if (event.type === 'previous') {
         this.onNativePrevious?.();
+      } else if (event.type === 'error') {
+        this.nativePlaying = false;
+        this.onStateChangeCallback?.(false);
+        this.onErrorCallback?.(event.message || 'Native playback error');
       }
     }).catch(() => {});
+  }
+
+  public static getInstance(): AudioEngine {
+    if (!AudioEngine.instance) {
+      AudioEngine.instance = new AudioEngine();
+    }
+    return AudioEngine.instance;
+  }
+
+  // =====================================================================
+  // Android: native-only playback
+  // =====================================================================
+
+  /**
+   * Native playback is strict: remote/file/content URIs go straight to
+   * ExoPlayer; stored tracks play from persistent native storage, importing
+   * the blob once if it is not there yet. Any failure is surfaced as an
+   * error — never as a silent switch to WebView audio.
+   */
+  private async playTrackNatively(track: Track, audioUrl?: string): Promise<void> {
+    const meta = {
+      title: track.title,
+      artist: track.artist,
+      album: track.album || 'Aether',
+    };
+
+    const remoteUrl = audioUrl || track.audioUrl;
+    if (
+      remoteUrl &&
+      (remoteUrl.startsWith('http://') ||
+        remoteUrl.startsWith('https://') ||
+        remoteUrl.startsWith('file://') ||
+        remoteUrl.startsWith('content://'))
+    ) {
+      await AetherPlayer.playUrl({ url: remoteUrl, ...meta });
+      this.nativePlaying = true;
+      this.onStateChangeCallback?.(true);
+      return;
+    }
+
+    if (!(await nativeTrackExists(track.id))) {
+      const blob = await getTrackBlob(track.id);
+      if (!blob) {
+        throw new Error(`No audio data found for "${track.title}"`);
+      }
+      // One-time import into persistent native storage. Afterwards this
+      // track never crosses the JS/native boundary again.
+      await importTrackToNativeStore(
+        { trackId: track.id, extension: extensionForTrack(track.format, blob.type) },
+        blob
+      );
+    }
+
+    await AetherPlayer.playStored({ trackId: track.id, ...meta });
+    // Optimistic: native state events (onIsPlayingChanged) remain the source
+    // of truth and will correct this if the deferred command fails.
+    this.nativePlaying = true;
+    this.onStateChangeCallback?.(true);
+
+    try {
+      window.localStorage.setItem('aether.lastTrackId', track.id);
+    } catch {
+      // ignore quota
+    }
+  }
+
+  // =====================================================================
+  // Web playback helpers
+  // =====================================================================
+
+  private ensureAudioElement(): HTMLAudioElement {
+    if (this.audioElement) return this.audioElement;
+    const audio = this.createAudioElement();
+    this.audioElement = audio;
+    this.wireAudioElementEvents(audio);
+    return audio;
   }
 
   private createAudioElement(): HTMLAudioElement {
@@ -94,31 +198,24 @@ export class AudioEngine {
     return audio;
   }
 
-  public static getInstance(): AudioEngine {
-    if (!AudioEngine.instance) {
-      AudioEngine.instance = new AudioEngine();
-    }
-    return AudioEngine.instance;
-  }
-
-  // Claim Exclusive Audio Focus on Android / System to silence other app voices & background playback
+  // Claim Exclusive Audio Focus on the web stack (no-op on Android where
+  // ExoPlayer requests focus natively with setAudioAttributes).
   public async claimExclusiveAudioFocus() {
+    if (this.usesNativePlayback()) return;
     try {
       if (this.audioCtx && this.audioCtx.state === 'suspended') {
         await this.audioCtx.resume();
       }
 
-      // Unmute and ensure volume is set
-      if (this.audioElement.muted) {
-        this.audioElement.muted = false;
+      const audio = this.audioElement;
+      if (audio?.muted) {
+        audio.muted = false;
       }
 
-      // Update MediaSession state only when real audio is active.
-      if ('mediaSession' in navigator) {
-        navigator.mediaSession.playbackState = this.audioElement.paused ? 'none' : 'playing';
+      if ('mediaSession' in navigator && audio) {
+        navigator.mediaSession.playbackState = audio.paused ? 'none' : 'playing';
       }
 
-      // Force OS audio manager to assign exclusive primary focus via micro-silent pulse if audioCtx ready
       if (this.audioCtx && this.audioCtx.state === 'running') {
         try {
           const osc = this.audioCtx.createOscillator();
@@ -131,7 +228,6 @@ export class AudioEngine {
         } catch {}
       }
 
-      // Acquire Screen/System WakeLock if supported
       this.acquireWakeLock();
     } catch (e) {
       console.warn('Audio focus claim exception:', e);
@@ -158,7 +254,7 @@ export class AudioEngine {
   }
 
   private isBackgrounded() {
-    return document.visibilityState === 'hidden' || (Capacitor.isNativePlatform() && !this.nativeAppIsActive);
+    return document.visibilityState === 'hidden';
   }
 
   private cancelBackgroundPlaybackRecovery() {
@@ -170,7 +266,6 @@ export class AudioEngine {
   }
 
   private scheduleBackgroundPlaybackRecovery(immediate = false) {
-    if (this.usesNativePlayback()) return;
     if (!this.shouldResumeAfterInterruption) return;
     if (!this.isBackgrounded()) {
       this.cancelBackgroundPlaybackRecovery();
@@ -184,6 +279,7 @@ export class AudioEngine {
 
     const attemptRecovery = async () => {
       this.backgroundRecoveryTimer = null;
+      const audio = this.audioElement;
 
       if (!this.shouldResumeAfterInterruption || !this.isBackgrounded()) {
         this.cancelBackgroundPlaybackRecovery();
@@ -194,11 +290,11 @@ export class AudioEngine {
         await this.audioCtx.resume().catch(() => {});
       }
 
-      if (this.audioElement.paused) {
-        await this.audioElement.play().catch(() => {});
+      if (audio?.paused) {
+        await audio.play().catch(() => {});
       }
 
-      if (!this.audioElement.paused) {
+      if (audio && !audio.paused) {
         this.backgroundAutoPaused = false;
         this.acquireWakeLock();
         this.syncMediaSessionPosition();
@@ -210,7 +306,7 @@ export class AudioEngine {
       const needsAnotherAttempt =
         this.shouldResumeAfterInterruption &&
         this.isBackgrounded() &&
-        (this.audioElement.paused || (this.audioCtx?.state === 'suspended'));
+        (!this.audioElement || this.audioElement.paused || this.audioCtx?.state === 'suspended');
 
       if (needsAnotherAttempt && this.backgroundRecoveryAttempts < 10) {
         this.backgroundRecoveryAttempts += 1;
@@ -232,7 +328,8 @@ export class AudioEngine {
   private setupVisibilityHandlers() {
     const recoverPlayback = () => {
       if (this.isBackgrounded()) {
-        if (!this.audioElement.paused) {
+        const audio = this.audioElement;
+        if (audio && !audio.paused) {
           this.shouldResumeAfterInterruption = true;
           this.syncMediaSessionPosition();
           if ('mediaSession' in navigator) {
@@ -252,42 +349,6 @@ export class AudioEngine {
     document.addEventListener('resume', recoverPlayback as EventListener);
   }
 
-  private setupNativeAppLifecycle() {
-    if (this.appLifecycleListenersRegistered || !Capacitor.isNativePlatform()) return;
-    this.appLifecycleListenersRegistered = true;
-
-    CapacitorApp.addListener('appStateChange', ({ isActive }) => {
-      this.nativeAppIsActive = isActive;
-
-      if (isActive) {
-        this.resumeAfterBackgroundInterruption();
-        return;
-      }
-
-      if (!this.audioElement.paused) {
-        this.shouldResumeAfterInterruption = true;
-        this.syncMediaSessionPosition();
-        if ('mediaSession' in navigator) {
-          navigator.mediaSession.playbackState = 'playing';
-        }
-        this.acquireWakeLock();
-        this.scheduleBackgroundPlaybackRecovery(true);
-      }
-    }).catch(() => {});
-
-    CapacitorApp.addListener('pause', () => {
-      this.nativeAppIsActive = false;
-      if (!this.audioElement.paused && this.shouldResumeAfterInterruption) {
-        this.scheduleBackgroundPlaybackRecovery(true);
-      }
-    }).catch(() => {});
-
-    CapacitorApp.addListener('resume', () => {
-      this.nativeAppIsActive = true;
-      this.resumeAfterBackgroundInterruption();
-    }).catch(() => {});
-  }
-
   private async resumeAfterBackgroundInterruption() {
     this.cancelBackgroundPlaybackRecovery();
 
@@ -295,12 +356,13 @@ export class AudioEngine {
       await this.audioCtx.resume().catch(() => {});
     }
 
-    if ((this.backgroundAutoPaused || this.audioElement.paused) && this.shouldResumeAfterInterruption) {
+    const audio = this.audioElement;
+    if (audio && (this.backgroundAutoPaused || audio.paused) && this.shouldResumeAfterInterruption) {
       this.backgroundAutoPaused = false;
-      await this.audioElement.play().catch(() => {});
+      await audio.play().catch(() => {});
     }
 
-    if (!this.audioElement.paused) {
+    if (audio && !audio.paused) {
       this.claimExclusiveAudioFocus();
       this.syncMediaSessionPosition();
     }
@@ -308,36 +370,42 @@ export class AudioEngine {
 
   private syncMediaSessionPosition() {
     if (!('mediaSession' in navigator)) return;
-    const dur = this.audioElement.duration || 0;
-    const cur = this.audioElement.currentTime || 0;
+    const audio = this.audioElement;
+    if (!audio) return;
+    const dur = audio.duration || 0;
+    const cur = audio.currentTime || 0;
 
     if (isFinite(dur) && dur > 0 && isFinite(cur)) {
       try {
         navigator.mediaSession.setPositionState({
           duration: dur,
-          playbackRate: this.audioElement.playbackRate || 1,
+          playbackRate: audio.playbackRate || 1,
           position: Math.max(0, Math.min(cur, dur)),
         });
       } catch {
-        // Position state is best-effort across Android WebView versions.
+        // Position state is best-effort across WebView versions.
       }
     }
   }
 
-  // Initialize Web Audio API nodes on user gesture with full error protection
+  // Initialize Web Audio API nodes on user gesture with full error protection.
+  // Android skips this entirely: the audio graph only exists to process
+  // HTMLAudioElement output, which is not used for native playback.
   public initWebAudio() {
-    // If AudioContext was closed by OS or error, re-initialize
+    if (this.usesNativePlayback()) return;
+
+    const audio = this.ensureAudioElement();
+
     if (this.audioCtx && this.audioCtx.state === 'closed') {
       this.isInitialized = false;
       this.audioCtx = null;
       this.sourceNode = null;
-      // Re-create HTMLAudioElement if source node was previously bound
-      const oldSrc = this.audioElement.src;
-      const oldTime = this.audioElement.currentTime;
+      const oldSrc = audio.src;
+      const oldTime = audio.currentTime;
       this.audioElement = this.createAudioElement();
       if (oldSrc) this.audioElement.src = oldSrc;
       this.audioElement.currentTime = oldTime;
-      this.setupAudioElementEvents();
+      this.wireAudioElementEvents(this.audioElement);
     }
 
     if (this.isInitialized) {
@@ -358,7 +426,6 @@ export class AudioEngine {
       this.preampGainNode = this.audioCtx.createGain();
       this.masterGainNode = this.audioCtx.createGain();
 
-      // Create 10-band EQ filters
       this.eqFilters = EQ_FREQUENCIES.map((freq, idx) => {
         const filter = this.audioCtx!.createBiquadFilter();
         if (idx === 0) {
@@ -374,7 +441,6 @@ export class AudioEngine {
         return filter;
       });
 
-      // Dedicated Bass Boost & Treble Boost filters
       this.bassFilter = this.audioCtx.createBiquadFilter();
       this.bassFilter.type = 'lowshelf';
       this.bassFilter.frequency.value = 100;
@@ -385,12 +451,9 @@ export class AudioEngine {
       this.trebleFilter.frequency.value = 8000;
       this.trebleFilter.gain.value = 0;
 
-      // Connect source to chain
       this.sourceNode = this.audioCtx.createMediaElementSource(this.audioElement);
 
-      // Connect chain: Source -> Preamp -> EQ filters -> Bass -> Treble -> Analyser -> Master Gain -> Destination
       let lastNode: AudioNode = this.sourceNode;
-
       lastNode.connect(this.preampGainNode);
       lastNode = this.preampGainNode;
 
@@ -415,8 +478,11 @@ export class AudioEngine {
     }
   }
 
-  private setupAudioElementEvents() {
-    this.audioElement.addEventListener('ended', () => {
+  private wireAudioElementEvents(audio: HTMLAudioElement) {
+    if ((audio as any).__aetherEventsWired) return;
+    (audio as any).__aetherEventsWired = true;
+
+    audio.addEventListener('ended', () => {
       this.cancelBackgroundPlaybackRecovery();
       this.shouldResumeAfterInterruption = false;
       this.backgroundAutoPaused = false;
@@ -425,22 +491,21 @@ export class AudioEngine {
       this.onTrackEndedCallback?.();
     });
 
-    this.audioElement.addEventListener('loadedmetadata', () => {
+    audio.addEventListener('loadedmetadata', () => {
       if (this.currentTrack) {
         this.updateMediaSession(this.currentTrack);
       }
       this.syncMediaSessionPosition();
     });
 
-    this.audioElement.addEventListener('timeupdate', () => {
-      const cur = this.audioElement.currentTime || 0;
-      const dur = this.audioElement.duration || 0;
+    audio.addEventListener('timeupdate', () => {
+      const cur = audio.currentTime || 0;
+      const dur = audio.duration || 0;
       this.onTimeUpdateCallback?.(cur, dur);
-
       this.syncMediaSessionPosition();
     });
 
-    this.audioElement.addEventListener('play', () => {
+    audio.addEventListener('play', () => {
       this.cancelBackgroundPlaybackRecovery();
       this.shouldResumeAfterInterruption = true;
       this.backgroundAutoPaused = false;
@@ -451,7 +516,7 @@ export class AudioEngine {
       }
     });
 
-    this.audioElement.addEventListener('pause', () => {
+    audio.addEventListener('pause', () => {
       if (this.isBackgrounded() && this.shouldResumeAfterInterruption) {
         this.backgroundAutoPaused = true;
         this.scheduleBackgroundPlaybackRecovery(true);
@@ -466,9 +531,8 @@ export class AudioEngine {
       }
     });
 
-    // Auto-Recovery on Media Loading Errors (prevents background player crashes)
-    this.audioElement.addEventListener('error', async () => {
-      console.warn('Audio element error encountered:', this.audioElement.error);
+    audio.addEventListener('error', async () => {
+      console.warn('Audio element error encountered:', audio.error);
       this.onStateChangeCallback?.(false);
 
       if (this.currentTrack) {
@@ -477,9 +541,9 @@ export class AudioEngine {
           if (blob) {
             const freshUrl = URL.createObjectURL(blob);
             this.setAudioSource(freshUrl);
-            this.audioElement.removeAttribute('crossorigin');
-            this.audioElement.load();
-            await this.audioElement.play();
+            audio.removeAttribute('crossorigin');
+            audio.load();
+            await audio.play();
             return;
           }
         } catch (err) {
@@ -487,12 +551,13 @@ export class AudioEngine {
         }
       }
 
-      // If recovery fails, skip to next track safely
       this.onTrackEndedCallback?.();
     });
   }
 
   private setAudioSource(src: string) {
+    const audio = this.audioElement;
+    if (!audio) return;
     if (this.currentObjectUrl && this.currentObjectUrl !== src) {
       try {
         URL.revokeObjectURL(this.currentObjectUrl);
@@ -500,83 +565,44 @@ export class AudioEngine {
     }
 
     this.currentObjectUrl = src.startsWith('blob:') ? src : null;
-    this.audioElement.src = src;
+    audio.src = src;
   }
 
-  private async playTrackNatively(track: Track, audioUrl?: string): Promise<boolean> {
-    if (!this.usesNativePlayback()) return false;
+  // =====================================================================
+  // Public API
+  // =====================================================================
 
-    const meta = {
-      title: track.title,
-      artist: track.artist,
-      album: track.album || 'Aether',
-    };
-
-    const remoteUrl = audioUrl || track.audioUrl;
-    if (remoteUrl && (remoteUrl.startsWith('http://') || remoteUrl.startsWith('https://') || remoteUrl.startsWith('file://') || remoteUrl.startsWith('content://'))) {
-      await AetherPlayer.playUrl({ url: remoteUrl, ...meta });
-      this.nativePlaying = true;
-      this.onStateChangeCallback?.(true);
-      return true;
-    }
-
-    const blob = await getTrackBlob(track.id);
-    if (!blob) return false;
-
-    const buffer = await blob.arrayBuffer();
-    const chunks = arrayBufferToBase64Chunks(buffer);
-    await AetherPlayer.beginCache({
-      trackId: track.id,
-      extension: extensionForTrack(track.format, blob.type),
-    });
-    for (const data of chunks) {
-      await AetherPlayer.appendCache({ data });
-    }
-    await AetherPlayer.playCached(meta);
-    try {
-      window.localStorage.setItem('aether.lastTrackId', track.id);
-    } catch {
-      // ignore quota
-    }
-    this.nativePlaying = true;
-    this.onStateChangeCallback?.(true);
-    return true;
-  }
-
-  // Load and play a track with CORS protection and Blob fallback
-  public async playTrack(
-    track: Track,
-    audioUrl?: string,
-    callbacks?: {
-      onEnded?: () => void;
-      onTimeUpdate?: (currentTime: number, duration: number) => void;
-      onStateChange?: (isPlaying: boolean) => void;
-    }
-  ): Promise<void> {
-    this.initWebAudio();
-
+  public async playTrack(track: Track, audioUrl?: string, callbacks?: AudioEngineCallbacks): Promise<void> {
     if (callbacks) {
       if (callbacks.onEnded) this.onTrackEndedCallback = callbacks.onEnded;
       if (callbacks.onTimeUpdate) this.onTimeUpdateCallback = callbacks.onTimeUpdate;
       if (callbacks.onStateChange) this.onStateChangeCallback = callbacks.onStateChange;
+      if (callbacks.onError) this.onErrorCallback = callbacks.onError;
     }
-
-    this.cancelBackgroundPlaybackRecovery();
     this.currentTrack = track;
 
-    try {
-      const usedNative = await this.playTrackNatively(track, audioUrl);
-      if (usedNative) {
-        this.updateMediaSession(track);
-        return;
+    if (this.usesNativePlayback()) {
+      // Android: native playback ONLY. No WebView fallback exists here — a
+      // fallback would reintroduce the exact background-playback failure
+      // this architecture exists to prevent.
+      try {
+        await this.playTrackNatively(track, audioUrl);
+      } catch (err) {
+        console.error('Native playback failed:', err);
+        this.nativePlaying = false;
+        this.onStateChangeCallback?.(false);
+        const message = err instanceof Error ? err.message : 'Native playback failed';
+        this.onErrorCallback?.(message);
       }
-    } catch (err) {
-      console.warn('Native playback unavailable, falling back to WebView audio:', err);
+      return;
     }
+
+    // ---- Web path ----
+    this.initWebAudio();
+    this.cancelBackgroundPlaybackRecovery();
 
     let urlToPlay = audioUrl || track.audioUrl;
 
-    // Fallback: If no URL or invalid, fetch from IndexedDB
     if (!urlToPlay) {
       try {
         const blob = await getTrackBlob(track.id);
@@ -594,20 +620,21 @@ export class AudioEngine {
       return;
     }
 
-    // Set CORS attribute ONLY for remote HTTP/HTTPS URLs (prevents blob URL crashes)
+    const audio = this.ensureAudioElement();
+
     if (urlToPlay.startsWith('http://') || urlToPlay.startsWith('https://')) {
-      this.audioElement.crossOrigin = 'anonymous';
+      audio.crossOrigin = 'anonymous';
     } else {
-      this.audioElement.removeAttribute('crossorigin');
+      audio.removeAttribute('crossorigin');
     }
 
     this.setAudioSource(urlToPlay);
-    this.audioElement.load();
+    audio.load();
 
     try {
       this.shouldResumeAfterInterruption = true;
       await this.claimExclusiveAudioFocus();
-      await this.audioElement.play();
+      await audio.play();
       this.updateMediaSession(track);
       this.syncMediaSessionPosition();
     } catch (err) {
@@ -618,35 +645,32 @@ export class AudioEngine {
 
   public play() {
     if (this.usesNativePlayback()) {
-      AetherPlayer.play().then(() => {
-        this.nativePlaying = true;
-        this.onStateChangeCallback?.(true);
-      }).catch(() => {});
+      AetherPlayer.play().catch((err) => console.error('Native play error:', err));
       return;
     }
     this.initWebAudio();
     this.shouldResumeAfterInterruption = true;
     this.claimExclusiveAudioFocus();
-    this.audioElement.play().catch((err) => console.error('Play error:', err));
+    this.audioElement?.play().catch((err) => console.error('Play error:', err));
   }
 
   public pause() {
     if (this.usesNativePlayback()) {
-      AetherPlayer.pause().then(() => {
-        this.nativePlaying = false;
-        this.onStateChangeCallback?.(false);
-      }).catch(() => {});
+      AetherPlayer.pause().catch((err) => console.error('Native pause error:', err));
       return;
     }
     this.cancelBackgroundPlaybackRecovery();
     this.shouldResumeAfterInterruption = false;
     this.backgroundAutoPaused = false;
     this.releaseWakeLock();
-    this.audioElement.pause();
+    this.audioElement?.pause();
   }
 
   public togglePlayPause() {
-    if (this.audioElement.paused) {
+    // Single source of truth: ask the active engine whether it is paused.
+    // (Do NOT inspect audioElement here — on Android it does not exist and
+    // the old check made "toggle" degenerate into "always play".)
+    if (this.isPaused()) {
       this.play();
     } else {
       this.pause();
@@ -659,12 +683,14 @@ export class AudioEngine {
       AetherPlayer.seek({ seconds }).catch(() => {});
       return;
     }
+    const audio = this.audioElement;
+    if (!audio) return;
     if (!isNaN(seconds) && isFinite(seconds)) {
-      const duration = this.audioElement.duration;
+      const duration = audio.duration;
       const clamped = isFinite(duration) && duration > 0
         ? Math.max(0, Math.min(seconds, duration))
         : Math.max(0, seconds);
-      this.audioElement.currentTime = clamped;
+      audio.currentTime = clamped;
       this.syncMediaSessionPosition();
     }
   }
@@ -673,15 +699,17 @@ export class AudioEngine {
     const clamped = Math.max(0, Math.min(1, val));
     if (this.usesNativePlayback()) {
       AetherPlayer.setVolume({ volume: clamped }).catch(() => {});
+      return;
     }
-    this.audioElement.volume = clamped;
+    if (this.audioElement) this.audioElement.volume = clamped;
   }
 
   public setPlaybackRate(rate: number) {
     if (this.usesNativePlayback()) {
       AetherPlayer.setPlaybackRate({ rate }).catch(() => {});
+      return;
     }
-    this.audioElement.playbackRate = rate;
+    if (this.audioElement) this.audioElement.playbackRate = rate;
   }
 
   public getAnalyserData(frequencyArray: Uint8Array, timeDomainArray: Uint8Array) {
@@ -694,12 +722,11 @@ export class AudioEngine {
     }
   }
 
-  // Apply Equalizer & Audio FX Settings
+  // Apply Equalizer & Audio FX Settings (web only; native path has no graph)
   public applyEQ(eq: EQSettings) {
     if (!this.isInitialized || !this.audioCtx || this.audioCtx.state === 'closed') return;
 
     if (this.preampGainNode) {
-      // Linear conversion from dB: 10^(dB/20)
       const preampVal = eq.enabled ? Math.pow(10, eq.preamp / 20) : 1;
       this.preampGainNode.gain.setValueAtTime(preampVal, this.audioCtx.currentTime);
     }
@@ -720,8 +747,11 @@ export class AudioEngine {
     }
   }
 
-  // Media Session API for Lock Screen Controls & Background Notifications
+  // Media Session API is the WEB lock-screen story. On Android the native
+  // MediaSession/notification owns metadata; a second WebView MediaSession
+  // would fight it, so this is a no-op there.
   public updateMediaSession(track: Track) {
+    if (this.usesNativePlayback()) return;
     if (!('mediaSession' in navigator)) return;
 
     const artworkUrl = track.coverArt && (track.coverArt.startsWith('http') || track.coverArt.startsWith('data:image'))
@@ -742,9 +772,8 @@ export class AudioEngine {
       ],
     });
 
-    navigator.mediaSession.playbackState = this.usesNativePlayback()
-      ? (this.nativePlaying ? 'playing' : 'paused')
-      : this.audioElement.paused ? 'paused' : 'playing';
+    const audio = this.audioElement;
+    navigator.mediaSession.playbackState = audio ? (audio.paused ? 'paused' : 'playing') : 'paused';
   }
 
   public registerMediaSessionHandlers(handlers: {
@@ -756,7 +785,20 @@ export class AudioEngine {
     onSeekForward?: () => void;
     onSeekTo?: (details: MediaSessionActionDetails) => void;
   }) {
+    // Remember the skip handlers either way: on Android they are invoked by
+    // native notification/lock-screen events routed through the plugin.
+    this.onNativeNext = handlers.onNext;
+    this.onNativePrevious = handlers.onPrevious;
+
+    if (this.usesNativePlayback()) {
+      // The native MediaSession handles transport controls; do not register
+      // a competing WebView MediaSession.
+      return;
+    }
+
     if (!('mediaSession' in navigator)) return;
+
+    const audio = () => this.audioElement;
 
     const actionMap: Partial<Record<MediaSessionAction, (details?: any) => void>> = {
       play: () => {
@@ -770,11 +812,11 @@ export class AudioEngine {
       previoustrack: handlers.onPrevious,
       nexttrack: handlers.onNext,
       seekbackward: () => {
-        this.seek(this.audioElement.currentTime - 10);
+        this.seek((audio()?.currentTime || 0) - 10);
         handlers.onSeekBackward?.();
       },
       seekforward: () => {
-        this.seek(this.audioElement.currentTime + 10);
+        this.seek((audio()?.currentTime || 0) + 10);
         handlers.onSeekForward?.();
       },
       seekto: (details: MediaSessionActionDetails) => {
@@ -785,9 +827,6 @@ export class AudioEngine {
       },
       stop: () => this.pause(),
     };
-
-    this.onNativeNext = handlers.onNext;
-    this.onNativePrevious = handlers.onPrevious;
 
     Object.entries(actionMap).forEach(([action, handler]) => {
       try {
@@ -803,17 +842,16 @@ export class AudioEngine {
   }
 
   public getCurrentTime(): number {
-    return this.usesNativePlayback() ? this.nativePosition : this.audioElement.currentTime || 0;
+    return this.usesNativePlayback() ? this.nativePosition : this.audioElement?.currentTime || 0;
   }
 
   public getDuration(): number {
-    return this.usesNativePlayback() ? this.nativeDuration : this.audioElement.duration || 0;
+    return this.usesNativePlayback() ? this.nativeDuration : this.audioElement?.duration || 0;
   }
 
   public isPaused(): boolean {
-    return this.usesNativePlayback() ? !this.nativePlaying : this.audioElement.paused;
+    return this.usesNativePlayback() ? !this.nativePlaying : this.audioElement?.paused ?? true;
   }
 }
 
 export const audioEngine = AudioEngine.getInstance();
-

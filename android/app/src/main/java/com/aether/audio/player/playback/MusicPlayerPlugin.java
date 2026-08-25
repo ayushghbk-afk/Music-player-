@@ -18,11 +18,24 @@ import java.io.File;
 public class MusicPlayerPlugin extends Plugin implements PlaybackManager.Listener {
 
     private PlaybackManager manager;
+    private LocalTrackServer trackServer;
 
     @Override
     public void load() {
         manager = PlaybackManager.get(getContext());
         manager.addListener(this);
+        startTrackServer();
+    }
+
+    private void startTrackServer() {
+        if (trackServer != null && trackServer.isRunning()) return;
+        try {
+            trackServer = LocalTrackServer.start(manager.getTrackStore());
+        } catch (Exception error) {
+            // Streaming import unavailable; the WebView falls back to chunked
+            // (base64) imports through this same plugin.
+            trackServer = null;
+        }
     }
 
     @Override
@@ -30,9 +43,63 @@ public class MusicPlayerPlugin extends Plugin implements PlaybackManager.Listene
         if (manager != null) {
             manager.removeListener(this);
         }
+        if (trackServer != null) {
+            trackServer.stop();
+            trackServer = null;
+        }
         super.handleOnDestroy();
     }
 
+    // ---------------------------------------------------------------------
+    // Imports
+    // ---------------------------------------------------------------------
+
+    /** Loopback endpoint info for streamed (non-base64) imports from the WebView. */
+    @PluginMethod
+    public void getServerInfo(PluginCall call) {
+        startTrackServer();
+        JSObject info = new JSObject();
+        if (trackServer != null && trackServer.isRunning()) {
+            info.put("available", true);
+            info.put("port", trackServer.getPort());
+            info.put("token", trackServer.getToken());
+        } else {
+            info.put("available", false);
+        }
+        call.resolve(info);
+    }
+
+    @PluginMethod
+    public void hasTrack(PluginCall call) {
+        String trackId = call.getString("trackId");
+        if (trackId == null || trackId.isEmpty()) {
+            call.reject("Missing trackId");
+            return;
+        }
+        JSObject result = new JSObject();
+        result.put("available", manager.hasStoredTrack(trackId));
+        call.resolve(result);
+    }
+
+    @PluginMethod
+    public void deleteTrack(PluginCall call) {
+        String trackId = call.getString("trackId");
+        if (trackId == null || trackId.isEmpty()) {
+            call.reject("Missing trackId");
+            return;
+        }
+        manager.deleteStoredTrack(trackId);
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void clearTracks(PluginCall call) {
+        JSObject result = new JSObject();
+        result.put("removed", manager.getTrackStore().clearAll());
+        call.resolve(result);
+    }
+
+    /** Chunked (base64) import fallback: begin. */
     @PluginMethod
     public void beginCache(PluginCall call) {
         String trackId = call.getString("trackId", "current");
@@ -45,6 +112,7 @@ public class MusicPlayerPlugin extends Plugin implements PlaybackManager.Listene
         }
     }
 
+    /** Chunked (base64) import fallback: append bytes. */
     @PluginMethod
     public void appendCache(PluginCall call) {
         String data = call.getString("data");
@@ -61,15 +129,58 @@ public class MusicPlayerPlugin extends Plugin implements PlaybackManager.Listene
         }
     }
 
+    /** Chunked (base64) import fallback: finalize without playing. */
+    @PluginMethod
+    public void commitCache(PluginCall call) {
+        try {
+            File file = manager.commitCache();
+            JSObject result = new JSObject();
+            result.put("path", file.getAbsolutePath());
+            call.resolve(result);
+        } catch (Exception error) {
+            call.reject(error.getMessage());
+        }
+    }
+
+    /** Chunked (base64) import fallback: finalize and play immediately. */
     @PluginMethod
     public void playCached(PluginCall call) {
         try {
             File file = manager.endCache();
-            playFromUri(Uri.fromFile(file), call);
-            call.resolve(currentState());
+            getBridge().executeOnMainThread(() -> {
+                playFromUri(Uri.fromFile(file), call);
+                call.resolve(currentState());
+            });
         } catch (Exception error) {
             call.reject(error.getMessage());
         }
+    }
+
+    // ---------------------------------------------------------------------
+    // Playback
+    //
+    // Capacitor invokes @PluginMethod on a bridge thread, but ExoPlayer is
+    // owned by the main looper and asserts single-thread access. Every
+    // method that touches the player is therefore dispatched to main;
+    // call.resolve() is safe from any thread.
+    // ---------------------------------------------------------------------
+
+    @PluginMethod
+    public void playStored(PluginCall call) {
+        String trackId = call.getString("trackId");
+        if (trackId == null || trackId.isEmpty()) {
+            call.reject("Missing trackId");
+            return;
+        }
+        File file = manager.findStoredTrack(trackId);
+        if (file == null || !file.exists()) {
+            call.reject("Track is not imported on this device");
+            return;
+        }
+        getBridge().executeOnMainThread(() -> {
+            playFromUri(Uri.fromFile(file), call);
+            call.resolve(currentState());
+        });
     }
 
     @PluginMethod
@@ -79,47 +190,63 @@ public class MusicPlayerPlugin extends Plugin implements PlaybackManager.Listene
             call.reject("Missing url");
             return;
         }
-        playFromUri(Uri.parse(url), call);
-        call.resolve(currentState());
+        getBridge().executeOnMainThread(() -> {
+            playFromUri(Uri.parse(url), call);
+            call.resolve(currentState());
+        });
     }
 
     @PluginMethod
     public void play(PluginCall call) {
-        manager.play();
-        call.resolve(currentState());
+        getBridge().executeOnMainThread(() -> {
+            manager.play();
+            call.resolve(currentState());
+        });
     }
 
     @PluginMethod
     public void pause(PluginCall call) {
-        manager.pause();
-        call.resolve(currentState());
+        getBridge().executeOnMainThread(() -> {
+            manager.pause();
+            call.resolve(currentState());
+        });
     }
 
     @PluginMethod
     public void seek(PluginCall call) {
         Double seconds = call.getDouble("seconds", 0d);
-        manager.seek((long) (seconds * 1000));
-        call.resolve(currentState());
+        getBridge().executeOnMainThread(() -> {
+            manager.seek((long) (seconds * 1000));
+            call.resolve(currentState());
+        });
     }
 
     @PluginMethod
     public void setVolume(PluginCall call) {
         Float volume = call.getFloat("volume", 1f);
-        manager.setVolume(volume);
-        call.resolve();
+        getBridge().executeOnMainThread(() -> {
+            manager.setVolume(volume);
+            call.resolve();
+        });
     }
 
     @PluginMethod
     public void setPlaybackRate(PluginCall call) {
         Float rate = call.getFloat("rate", 1f);
-        manager.setPlaybackRate(rate);
-        call.resolve();
+        getBridge().executeOnMainThread(() -> {
+            manager.setPlaybackRate(rate);
+            call.resolve();
+        });
     }
 
     @PluginMethod
     public void getState(PluginCall call) {
-        call.resolve(currentState());
+        getBridge().executeOnMainThread(() -> call.resolve(currentState()));
     }
+
+    // ---------------------------------------------------------------------
+    // Events to the WebView
+    // ---------------------------------------------------------------------
 
     @Override
     public void onIsPlayingChanged(boolean isPlaying) {

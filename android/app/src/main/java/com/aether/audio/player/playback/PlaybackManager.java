@@ -20,10 +20,20 @@ import androidx.media3.common.Player;
 import androidx.media3.exoplayer.ExoPlayer;
 
 import java.io.File;
-import java.io.FileOutputStream;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 
+/**
+ * Owns the single ExoPlayer instance shared by the WebView bridge and the
+ * MediaSessionService.
+ *
+ * Lifecycle contract (important for background playback):
+ * every playback command is deferred until the foreground service has actually
+ * finished onCreate(), so the MediaSession exists before ExoPlayer starts.
+ * The previous behavior (prepare -> play -> startService) raced ExoPlayer
+ * against the service becoming the foreground lifecycle owner.
+ */
 public final class PlaybackManager {
 
     public interface Listener {
@@ -35,23 +45,36 @@ public final class PlaybackManager {
         void onError(String message);
     }
 
-    private static PlaybackManager instance;
+    private static final long SERVICE_START_TIMEOUT_MS = 2000;
+    private static final long POSITION_PERSIST_INTERVAL_MS = 5000;
+
+    private static volatile PlaybackManager instance;
 
     private final Context appContext;
     private final ExoPlayer exoPlayer;
     private final Player player;
+    private final TrackStore trackStore;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final List<Listener> listeners = new ArrayList<>();
     private final SharedPreferences prefs;
 
-    private File cacheFile;
-    private FileOutputStream cacheOut;
     private boolean noisyRegistered;
+    private TrackStore.TempWrite activeWrite;
+    private volatile boolean serviceReady = false;
+    private final List<Runnable> pendingCommands = new ArrayList<>();
+    private final Runnable serviceTimeout = new Runnable() {
+        @Override
+        public void run() {
+            drainPendingCommands();
+        }
+    };
+    private long lastPersistAt = 0;
+
     private final Runnable positionTick = new Runnable() {
         @Override
         public void run() {
             notifyPosition();
-            persistPosition();
+            persistPositionThrottled();
             mainHandler.postDelayed(this, 500);
         }
     };
@@ -68,16 +91,26 @@ public final class PlaybackManager {
     private PlaybackManager(Context context) {
         this.appContext = context.getApplicationContext();
         this.prefs = appContext.getSharedPreferences("aether_playback", Context.MODE_PRIVATE);
+        this.trackStore = new TrackStore(appContext);
 
         AudioAttributes attrs = new AudioAttributes.Builder()
                 .setUsage(C.USAGE_MEDIA)
                 .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
                 .build();
 
-        exoPlayer = new ExoPlayer.Builder(appContext).build();
+        // The player MUST be owned by the main looper: Capacitor plugin calls
+        // arrive on a bridge thread and the service/MediaSession run on main.
+        // ExoPlayer enforces single-thread access (verifyApplicationThread),
+        // so everything is funneled to main — see get() and the plugin.
+        exoPlayer = new ExoPlayer.Builder(appContext)
+                .setLooper(Looper.getMainLooper())
+                .build();
         exoPlayer.setAudioAttributes(attrs, true);
         exoPlayer.setHandleAudioBecomingNoisy(true);
-        exoPlayer.setWakeMode(C.WAKE_MODE_LOCAL);
+        // NETWORK is a superset of LOCAL: holds a partial wake lock during
+        // playback (required for local files) plus a Wi-Fi lock for http(s)
+        // streams. The screen must NOT be kept awake for audio playback.
+        exoPlayer.setWakeMode(C.WAKE_MODE_NETWORK);
         player = new ForwardingPlayer(exoPlayer) {
             @Override
             public boolean isCommandAvailable(int command) {
@@ -154,77 +187,151 @@ public final class PlaybackManager {
         });
     }
 
-    public static synchronized PlaybackManager get(Context context) {
-        if (instance == null) {
-            instance = new PlaybackManager(context);
+    private static final Object CREATE_LOCK = new Object();
+
+    /**
+     * Returns the singleton, guaranteeing it was constructed on the main
+     * thread (the player's application looper). Safe to call from the
+     * Capacitor bridge thread or from the service.
+     */
+    public static PlaybackManager get(Context context) {
+        if (instance != null) return instance;
+
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            synchronized (CREATE_LOCK) {
+                if (instance == null) {
+                    instance = new PlaybackManager(context.getApplicationContext());
+                }
+            }
+            return instance;
         }
-        return instance;
+
+        // Called off-main (e.g. Capacitor bridge thread): construct on main
+        // and wait. No monitor is held while waiting, so main runs freely.
+        final CountDownLatch latch = new CountDownLatch(1);
+        new Handler(Looper.getMainLooper()).post(() -> {
+            get(context);
+            latch.countDown();
+        });
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while initializing PlaybackManager", e);
+        }
+        synchronized (CREATE_LOCK) {
+            if (instance == null) {
+                throw new IllegalStateException("PlaybackManager failed to initialize");
+            }
+            return instance;
+        }
     }
 
     public Player getPlayer() {
         return player;
     }
 
+    public TrackStore getTrackStore() {
+        return trackStore;
+    }
+
     public void addListener(Listener listener) {
-        listeners.add(listener);
+        synchronized (listeners) {
+            listeners.add(listener);
+        }
     }
 
     public void removeListener(Listener listener) {
-        listeners.remove(listener);
+        synchronized (listeners) {
+            listeners.remove(listener);
+        }
     }
 
-    public void beginCache(String trackId, String extension) throws Exception {
-        closeCache();
-        File dir = new File(appContext.getCacheDir(), "aether-tracks");
-        if (!dir.exists() && !dir.mkdirs()) {
-            throw new Exception("Unable to create cache directory");
-        }
-        cacheFile = new File(dir, sanitize(trackId) + (extension.startsWith(".") ? extension : "." + extension));
-        cacheOut = new FileOutputStream(cacheFile, false);
+    // ---------------------------------------------------------------------
+    // Service lifecycle
+    // ---------------------------------------------------------------------
+
+    /** Called by {@link MusicPlayerService#onCreate()} once its session exists. */
+    public void onServiceReady() {
+        if (serviceReady) return;
+        serviceReady = true;
+        mainHandler.removeCallbacks(serviceTimeout);
+        drainPendingCommands();
     }
 
-    public void appendCache(byte[] chunk) throws Exception {
-        if (cacheOut == null) {
-            throw new Exception("Cache write has not been started");
-        }
-        cacheOut.write(chunk);
+    /** Called by {@link MusicPlayerService#onDestroy()} so the next play re-starts the service. */
+    public void onServiceDestroyed() {
+        serviceReady = false;
     }
 
-    public File endCache() throws Exception {
-        if (cacheOut != null) {
-            cacheOut.flush();
-            cacheOut.close();
-            cacheOut = null;
-        }
-        if (cacheFile == null || !cacheFile.exists()) {
-            throw new Exception("No cached audio file");
-        }
-        return cacheFile;
+    /**
+     * Runs a playback command only after the foreground service is up:
+     * service -> media session -> setMediaItem -> prepare -> play.
+     * If the service is already alive the command runs immediately; if the
+     * service cannot be started we still run the command (better one attempt
+     * with no foreground service than silence) after a short timeout.
+     */
+    private void runWhenServiceReady(final Runnable command) {
+        mainHandler.post(() -> {
+            if (serviceReady) {
+                command.run();
+                return;
+            }
+            synchronized (pendingCommands) {
+                pendingCommands.add(command);
+            }
+            try {
+                Intent intent = new Intent(appContext, MusicPlayerService.class);
+                appContext.startForegroundService(intent);
+            } catch (IllegalStateException | SecurityException e) {
+                // Foreground-service start not allowed from the current app
+                // state (e.g. Android 12+ background restrictions). Drain now.
+                drainPendingCommands();
+                return;
+            }
+            mainHandler.postDelayed(serviceTimeout, SERVICE_START_TIMEOUT_MS);
+        });
     }
+
+    private void drainPendingCommands() {
+        List<Runnable> toRun;
+        synchronized (pendingCommands) {
+            if (pendingCommands.isEmpty()) return;
+            toRun = new ArrayList<>(pendingCommands);
+            pendingCommands.clear();
+        }
+        for (Runnable command : toRun) {
+            mainHandler.post(command);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // Playback commands
+    // ---------------------------------------------------------------------
 
     public void playFile(File file, String title, String artist, String album, long startPositionMs) {
         playUri(Uri.fromFile(file), title, artist, album, startPositionMs);
     }
 
-    public void playUri(Uri uri, String title, String artist, String album, long startPositionMs) {
-        MediaMetadata metadata = new MediaMetadata.Builder()
-                .setTitle(title)
-                .setArtist(artist)
-                .setAlbumTitle(album)
-                .build();
-        MediaItem item = new MediaItem.Builder()
-                .setUri(uri)
-                .setMediaMetadata(metadata)
-                .build();
-        player.setMediaItem(item, startPositionMs > 0 ? startPositionMs : 0);
-        player.prepare();
-        player.play();
-        startService();
+    public void playUri(final Uri uri, final String title, final String artist, final String album, final long startPositionMs) {
+        runWhenServiceReady(() -> {
+            MediaMetadata metadata = new MediaMetadata.Builder()
+                    .setTitle(title)
+                    .setArtist(artist)
+                    .setAlbumTitle(album)
+                    .build();
+            MediaItem item = new MediaItem.Builder()
+                    .setUri(uri)
+                    .setMediaMetadata(metadata)
+                    .build();
+            player.setMediaItem(item, startPositionMs > 0 ? startPositionMs : 0);
+            player.prepare();
+            player.play();
+        });
     }
 
     public void play() {
-        player.play();
-        startService();
+        runWhenServiceReady(player::play);
     }
 
     public void pause() {
@@ -274,9 +381,67 @@ public final class PlaybackManager {
         return prefs.getLong("position_ms", 0);
     }
 
-    private void startService() {
-        Intent intent = new Intent(appContext, MusicPlayerService.class);
-        appContext.startForegroundService(intent);
+    // ---------------------------------------------------------------------
+    // Chunked (base64) import fallback — used only when the loopback server
+    // is unavailable. The primary import path streams via LocalTrackServer.
+    // ---------------------------------------------------------------------
+
+    public void beginCache(String trackId, String extension) throws Exception {
+        closeCache();
+        try {
+            activeWrite = trackStore.beginWrite(trackId, extension);
+        } catch (Exception error) {
+            throw new Exception("Unable to create track file: " + error.getMessage());
+        }
+    }
+
+    public void appendCache(byte[] chunk) throws Exception {
+        if (activeWrite == null) {
+            throw new Exception("Cache write has not been started");
+        }
+        try {
+            activeWrite.out.write(chunk);
+        } catch (Exception error) {
+            trackStore.abortWrite(activeWrite);
+            activeWrite = null;
+            throw new Exception("Cache write failed: " + error.getMessage());
+        }
+    }
+
+    /** Finalizes a chunked import WITHOUT starting playback. */
+    public File commitCache() throws Exception {
+        if (activeWrite == null) {
+            throw new Exception("No track import in progress");
+        }
+        TrackStore.TempWrite write = activeWrite;
+        activeWrite = null;
+        try {
+            trackStore.finishWrite(write);
+        } catch (Exception error) {
+            trackStore.abortWrite(write);
+            throw new Exception("Unable to finalize track: " + error.getMessage());
+        }
+        if (!write.target.exists()) {
+            throw new Exception("No stored audio file");
+        }
+        return write.target;
+    }
+
+    /** Legacy bridge method: finalize the chunked import and immediately play it. */
+    public File endCache() throws Exception {
+        return commitCache();
+    }
+
+    public File findStoredTrack(String trackId) {
+        return trackStore.findTrackFile(trackId);
+    }
+
+    public boolean hasStoredTrack(String trackId) {
+        return trackStore.hasTrack(trackId);
+    }
+
+    public boolean deleteStoredTrack(String trackId) {
+        return trackStore.deleteTrack(trackId);
     }
 
     private void notifyPosition() {
@@ -287,11 +452,19 @@ public final class PlaybackManager {
         }
     }
 
+    private void persistPositionThrottled() {
+        long now = System.currentTimeMillis();
+        if (now - lastPersistAt < POSITION_PERSIST_INTERVAL_MS) return;
+        lastPersistAt = now;
+        persistPosition();
+    }
+
     private void persistPosition() {
         persistPosition(getPositionMs());
     }
 
     private void persistPosition(long positionMs) {
+        lastPersistAt = System.currentTimeMillis();
         prefs.edit().putLong("position_ms", Math.max(0, positionMs)).apply();
     }
 
@@ -312,20 +485,15 @@ public final class PlaybackManager {
     }
 
     private void closeCache() {
-        try {
-            if (cacheOut != null) {
-                cacheOut.close();
-            }
-        } catch (Exception ignored) {
+        if (activeWrite != null) {
+            trackStore.abortWrite(activeWrite);
+            activeWrite = null;
         }
-        cacheOut = null;
     }
 
     private List<Listener> copyListeners() {
-        return new ArrayList<>(listeners);
-    }
-
-    private static String sanitize(String value) {
-        return value.replaceAll("[^a-zA-Z0-9._-]", "_");
+        synchronized (listeners) {
+            return new ArrayList<>(listeners);
+        }
     }
 }
