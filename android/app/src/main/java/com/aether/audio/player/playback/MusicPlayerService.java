@@ -37,7 +37,6 @@ public class MusicPlayerService extends MediaSessionService {
         mediaSession = new MediaSession.Builder(this, player)
                 .setId("aether-session")
                 .setSessionActivity(pendingIntent)
-                .setCallback(new SessionCallback())
                 .build();
 
         // The session now exists: any playback command queued by
@@ -106,13 +105,6 @@ public class MusicPlayerService extends MediaSessionService {
         NotificationManager manager = getSystemService(NotificationManager.class);
         if (manager != null) {
             manager.createNotificationChannel(channel);
-        }
-    }
-
-    private static final class SessionCallback implements MediaSession.Callback {
-        @Override
-        public boolean onMediaButtonEvent(MediaSession session, android.content.Intent mediaButtonIntent) {
-            return MediaSession.Callback.super.onMediaButtonEvent(session, mediaButtonIntent);
         }
     }
 }
