@@ -1,104 +1,151 @@
-import React from 'react';
-import { Disc, Play, Music, Sparkles } from 'lucide-react';
-import { Track } from '../types';
-
-interface AlbumsViewProps {
+import React, { useMemo, useState } from "react";
+import { Play, Search, ArrowLeft, Disc3, ArrowUpRight } from "lucide-react";
+import { Track } from "../types";
+import { Artwork, displayTitle, timeLabel } from "./Artwork";
+export function AlbumsView({
+  tracks,
+  onPlayTrack,
+}: {
   tracks: Track[];
   onPlayTrack: (track: Track) => void;
-}
-
-interface AlbumGroup {
-  name: string;
-  artist: string;
-  coverArt?: string;
-  isHiRes: boolean;
-  tracks: Track[];
-}
-
-export const AlbumsView: React.FC<AlbumsViewProps> = ({ tracks, onPlayTrack }) => {
-  // Group tracks by Album
-  const albumsMap = tracks.reduce((acc, track) => {
-    const albumName = track.album || 'Unknown Album';
-    if (!acc[albumName]) {
-      acc[albumName] = {
-        name: albumName,
-        artist: track.artist,
-        coverArt: track.coverArt,
-        isHiRes: track.isHiRes,
-        tracks: [],
-      };
-    }
-    acc[albumName].tracks.push(track);
-    return acc;
-  }, {} as Record<string, AlbumGroup>);
-
-  const albumsList: AlbumGroup[] = Object.values(albumsMap);
-
+}) {
+  const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState<string | null>(null);
+  const [groupBy, setGroupBy] = useState<"album" | "artist">("album");
+  const groups = useMemo(() => {
+    const map = new Map<string, Track[]>();
+    tracks.forEach((t) => {
+      const key = groupBy === "artist" ? t.artist : t.album;
+      map.set(key, [...(map.get(key) || []), t]);
+    });
+    return [...map.entries()].sort(([a], [b]) => a.localeCompare(b));
+  }, [tracks, groupBy]);
+  const collection = groups.find(([key]) => key === selected);
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-bold text-white tracking-wide">Albums & Collections</h2>
-        <p className="text-xs text-zinc-400">Organized audiophile master albums in your local vault</p>
+    <section className="collection-page">
+      <div className="page-intro">
+        <div>
+          <div className="eyebrow">THE COLLECTION, RECONSIDERED</div>
+          <h1>
+            {groupBy === "album"
+              ? "An album is a whole world."
+              : "The people behind the sound."}
+          </h1>
+          <p>Take your time. There’s a story in every record.</p>
+        </div>
+        <Disc3 size={25} className="page-symbol" />
       </div>
-
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-        {albumsList.map((album) => {
-          const totalDuration = album.tracks.reduce((sum, t) => sum + t.duration, 0);
-          const mins = Math.round(totalDuration / 60);
-
-          return (
-            <div
-              key={album.name}
-              className="bg-zinc-900/60 border border-white/5 p-3 rounded-2xl group hover:border-sky-500/30 transition-all duration-300 hover:scale-[1.02]"
-            >
-              {/* Cover Art Card */}
-              <div
-                className="w-full aspect-square rounded-xl overflow-hidden shadow-lg relative mb-3 border border-white/5"
-                style={{
-                  background: album.coverArt?.startsWith('linear')
-                    ? album.coverArt
-                    : '#27272a',
-                }}
+      {collection ? (
+        <>
+          <button className="text-back" onClick={() => setSelected(null)}>
+            <ArrowLeft size={14} /> Back to {groupBy}s
+          </button>
+          <div className="album-detail-hero">
+            <Artwork track={collection[1][0]} />
+            <div>
+              <div className="eyebrow">
+                YOUR {groupBy.toUpperCase()} COLLECTION
+              </div>
+              <h2>{collection[0]}</h2>
+              <p>
+                {collection[1][0].artist} · {collection[1].length} tracks ·{" "}
+                {timeLabel(collection[1].reduce((n, t) => n + t.duration, 0))}
+              </p>
+              <button
+                className="button-primary"
+                onClick={() => onPlayTrack(collection[1][0])}
               >
-                {album.coverArt && album.coverArt.startsWith('http') ? (
-                  <img
-                    src={album.coverArt}
-                    alt={album.name}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                  />
-                ) : null}
-
-                {/* Overlay Play Button */}
-                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity duration-200">
-                  <button
-                    onClick={() => onPlayTrack(album.tracks[0])}
-                    className="w-12 h-12 rounded-full bg-white text-black flex items-center justify-center shadow-xl hover:scale-110 active:scale-95 transition-transform"
-                    title="Play Album"
-                  >
-                    <Play className="w-6 h-6 fill-current ml-0.5" />
-                  </button>
-                </div>
-
-                {album.isHiRes && (
-                  <div className="absolute top-2 left-2 bg-black/60 backdrop-blur-md px-2 py-0.5 rounded-full border border-amber-500/40 text-amber-300 text-[9px] font-mono font-bold flex items-center gap-1">
-                    <Sparkles className="w-2.5 h-2.5" />
-                    HI-RES
-                  </div>
-                )}
-              </div>
-
-              {/* Album Info */}
-              <h3 className="text-xs font-semibold text-white truncate">{album.name}</h3>
-              <p className="text-[11px] text-zinc-400 truncate">{album.artist}</p>
-              <div className="flex items-center gap-2 mt-2 text-[10px] font-mono text-zinc-500">
-                <span>{album.tracks.length} tracks</span>
-                <span>•</span>
-                <span>{mins} mins</span>
-              </div>
+                <Play size={13} fill="currentColor" /> Play first track
+              </button>
             </div>
-          );
-        })}
-      </div>
-    </div>
+          </div>
+          <div className="album-detail-tracks">
+            {collection[1].map((track, i) => (
+              <button key={track.id} onClick={() => onPlayTrack(track)}>
+                <span>{String(i + 1).padStart(2, "0")}</span>
+                <Artwork track={track} />
+                <div>
+                  <strong>{displayTitle(track)}</strong>
+                  <small>{track.artist}</small>
+                </div>
+                <span className="quality-pill">{track.format}</span>
+                <span>{timeLabel(track.duration)}</span>
+                <Play size={14} />
+              </button>
+            ))}
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="collection-toolbar">
+            <div className="segmented-control">
+              <button
+                className={groupBy === "album" ? "selected" : ""}
+                onClick={() => setGroupBy("album")}
+              >
+                Albums
+              </button>
+              <button
+                className={groupBy === "artist" ? "selected" : ""}
+                onClick={() => setGroupBy("artist")}
+              >
+                Artists
+              </button>
+            </div>
+            <label className="library-search">
+              <Search size={15} />
+              <input
+                aria-label="Search albums and artists"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Find something you love"
+              />
+            </label>
+          </div>
+          <div className="album-browser">
+            {groups
+              .filter(([name, list]) =>
+                `${name} ${list[0].artist}`
+                  .toLowerCase()
+                  .includes(query.toLowerCase()),
+              )
+              .map(([name, list]) => (
+                <button
+                  className="album-browser-card"
+                  key={name}
+                  onClick={() => setSelected(name)}
+                >
+                  <div className="album-browser-art">
+                    <Artwork track={list[0]} />
+                    <span className="album-corner">
+                      {list.some((t) => t.isHiRes) ? "HI-RES" : "LOCAL AUDIO"}
+                    </span>
+                    <span className="album-play">
+                      <ArrowUpRight size={18} />
+                    </span>
+                  </div>
+                  <h3>{name}</h3>
+                  <p>
+                    {groupBy === "album"
+                      ? list[0].artist
+                      : `${new Set(list.map((t) => t.album)).size} albums`}
+                  </p>
+                  <small>
+                    {list.length} {list.length === 1 ? "track" : "tracks"} ·{" "}
+                    {timeLabel(list.reduce((n, t) => n + t.duration, 0))}
+                  </small>
+                </button>
+              ))}
+          </div>
+          {!groups.length && (
+            <div className="empty-library">
+              <Disc3 />
+              <h3>Your next discovery is waiting.</h3>
+              <p>Import some local files to start your album collection.</p>
+            </div>
+          )}
+        </>
+      )}
+    </section>
   );
-};
+}

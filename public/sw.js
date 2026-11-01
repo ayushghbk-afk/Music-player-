@@ -1,69 +1,12 @@
-const CACHE_NAME = 'aether-audio-v1';
-const PRECACHE_ASSETS = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  '/pwa-192.png',
-  '/pwa-512.png',
-  '/apple-touch-icon.png'
-];
-
-// Install Event
-self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then((cache) => {
-        return cache.addAll(PRECACHE_ASSETS);
-      })
-      .then(() => self.skipWaiting())
-  );
-});
-
-// Activate Event - Clean up old caches
-self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames
-          .filter((name) => name !== CACHE_NAME)
-          .map((name) => caches.delete(name))
-      );
-    }).then(() => self.clients.claim())
-  );
-});
-
-// Fetch Event - Network first with Cache fallback, plus caching runtime assets
-self.addEventListener('fetch', (event) => {
-  // Skip non-GET requests or browser extension/chrome-extension requests
-  if (event.request.method !== 'GET') return;
+const CACHE = 'aether-v2';
+const ASSETS = ['/', '/index.html', '/manifest.json', '/pwa-192.png', '/pwa-512.png', '/apple-touch-icon.png', '/aether-mark.svg' /* BUILD_ASSETS */];
+self.addEventListener('install', event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(ASSETS)).then(() => self.skipWaiting())));
+self.addEventListener('activate', event => event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k.startsWith('aether-') && k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())));
+self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
-  
-  // Skip API requests from offline cache
-  if (url.pathname.startsWith('/api/')) return;
-
-  event.respondWith(
-    fetch(event.request)
-      .then((response) => {
-        // If valid response, clone & put into cache
-        if (response && response.status === 200 && response.type === 'basic') {
-          const responseClone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, responseClone);
-          });
-        }
-        return response;
-      })
-      .catch(() => {
-        // Network failed, serve from cache
-        return caches.match(event.request).then((cachedResponse) => {
-          if (cachedResponse) {
-            return cachedResponse;
-          }
-          // If HTML request failed, return index.html fallback
-          if (event.request.headers.get('accept')?.includes('text/html')) {
-            return caches.match('/index.html');
-          }
-        });
-      })
-  );
+  if (event.request.method !== 'GET' || url.origin !== self.location.origin || url.pathname.startsWith('/api/')) return;
+  event.respondWith(fetch(event.request).then(response => {
+    if (response.ok) event.waitUntil(caches.open(CACHE).then(cache => cache.put(event.request, response.clone())));
+    return response;
+  }).catch(async () => (await caches.match(event.request)) || (event.request.mode === 'navigate' ? await caches.match('/index.html') : undefined) || new Response('Offline asset unavailable', { status: 503 })));
 });

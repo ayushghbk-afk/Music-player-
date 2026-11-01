@@ -13,6 +13,7 @@ import androidx.media3.session.MediaSessionService;
 
 import com.aether.audio.player.MainActivity;
 
+@androidx.media3.common.util.UnstableApi
 public class MusicPlayerService extends MediaSessionService {
 
     public static final String CHANNEL_ID = "aether_playback";

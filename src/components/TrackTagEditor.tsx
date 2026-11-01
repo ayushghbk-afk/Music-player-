@@ -1,191 +1,110 @@
-import React, { useState } from 'react';
-import { Edit2, Sparkles, X, Save } from 'lucide-react';
-import { Track, AudioFormat } from '../types';
-
-interface TrackTagEditorProps {
-  track: Track | null;
-  isOpen: boolean;
-  onSaveTrack: (updatedTrack: Track) => void;
-  onClose: () => void;
-}
-
-export const TrackTagEditor: React.FC<TrackTagEditorProps> = ({
+import React, { useState } from "react";
+import { Track } from "../types";
+import { useDialogFocus } from "./useDialogFocus";
+import { Artwork } from "./Artwork";
+import { X } from "lucide-react";
+export function TrackTagEditor({
   track,
   isOpen,
   onSaveTrack,
   onClose,
-}) => {
-  if (!isOpen || !track) return null;
-
-  const [title, setTitle] = useState(track.title);
-  const [artist, setArtist] = useState(track.artist);
-  const [album, setAlbum] = useState(track.album);
-  const [year, setYear] = useState(track.year || new Date().getFullYear());
-  const [genre, setGenre] = useState(track.genre || 'Audiophile');
-  const [format, setFormat] = useState<AudioFormat>(track.format);
-  const [bitrate, setBitrate] = useState(track.bitrate);
-  const [isHiRes, setIsHiRes] = useState(track.isHiRes);
-  const [lyrics, setLyrics] = useState(track.lyrics || '');
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    onSaveTrack({
-      ...track,
-      title,
-      artist,
-      album,
-      year: Number(year),
-      genre,
-      format,
-      bitrate,
-      isHiRes,
-      lyrics,
-    });
-    onClose();
-  };
-
+}: {
+  track: Track | null;
+  isOpen: boolean;
+  onSaveTrack: (track: Track) => void;
+  onClose: () => void;
+}) {
+  const [draft, setDraft] = useState<Track | null>(track);
+  const ref = useDialogFocus(isOpen, onClose);
+  if (!isOpen || !draft) return null;
+  const field = "bg-zinc-900 border border-white/10 rounded-lg p-3 w-full mt-1";
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 select-none">
-      <form
-        onSubmit={handleSubmit}
-        className="bg-zinc-950 border border-white/10 rounded-3xl p-6 w-full max-w-lg space-y-4 shadow-2xl animate-fadeIn"
-      >
-        <div className="flex items-center justify-between border-b border-white/5 pb-3">
-          <div className="flex items-center gap-2.5">
-            <Edit2 className="w-4 h-4 text-sky-400" />
-            <h3 className="text-sm font-bold text-white">Edit Track Metadata & Tags</h3>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1 rounded-xl text-zinc-400 hover:text-white"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3 text-xs">
-          <div className="col-span-2">
-            <label className="text-zinc-400 block mb-1">Track Title</label>
-            <input
-              type="text"
-              required
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-sky-500"
-            />
-          </div>
-
-          <div>
-            <label className="text-zinc-400 block mb-1">Artist</label>
-            <input
-              type="text"
-              required
-              value={artist}
-              onChange={(e) => setArtist(e.target.value)}
-              className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-sky-500"
-            />
-          </div>
-
-          <div>
-            <label className="text-zinc-400 block mb-1">Album</label>
-            <input
-              type="text"
-              required
-              value={album}
-              onChange={(e) => setAlbum(e.target.value)}
-              className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-sky-500"
-            />
-          </div>
-
-          <div>
-            <label className="text-zinc-400 block mb-1">Format Codec</label>
-            <select
-              value={format}
-              onChange={(e) => setFormat(e.target.value as AudioFormat)}
-              className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-sky-500"
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Edit track tags"
+      className="dialog-backdrop tag-editor"
+    >
+      <section ref={ref} className="tag-dialog">
+        <form
+          className="bg-zinc-950 border border-white/15 rounded-2xl p-6 max-w-xl w-full max-h-[90vh] overflow-auto space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            onSaveTrack(draft);
+            onClose();
+          }}
+        >
+          <div className="tag-heading">
+            <Artwork track={draft} />
+            <div>
+              <div className="eyebrow">THE FINER DETAILS</div>
+              <h2 className="text-xl">Make it your own.</h2>
+              <p>Library metadata only. Your original audio stays untouched.</p>
+            </div>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Close track editor"
+              onClick={onClose}
             >
-              <option value="FLAC">FLAC Lossless</option>
-              <option value="WAV">WAV Master</option>
-              <option value="DSD">DSD Audio</option>
-              <option value="ALAC">ALAC Lossless</option>
-              <option value="MP3">MP3</option>
-              <option value="AAC">AAC</option>
-            </select>
+              <X size={18} />
+            </button>
           </div>
-
-          <div>
-            <label className="text-zinc-400 block mb-1">Quality Spec</label>
-            <input
-              type="text"
-              value={bitrate}
-              onChange={(e) => setBitrate(e.target.value)}
-              className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-sky-500 font-mono"
-            />
-          </div>
-
-          <div>
-            <label className="text-zinc-400 block mb-1">Year</label>
-            <input
-              type="number"
-              value={year}
-              onChange={(e) => setYear(Number(e.target.value))}
-              className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-sky-500 font-mono"
-            />
-          </div>
-
-          <div>
-            <label className="text-zinc-400 block mb-1">Genre</label>
-            <input
-              type="text"
-              value={genre}
-              onChange={(e) => setGenre(e.target.value)}
-              className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-sky-500"
-            />
-          </div>
-
-          <div className="col-span-2 flex items-center gap-2 bg-black/40 p-3 rounded-xl border border-white/5">
-            <input
-              type="checkbox"
-              id="hires-check"
-              checked={isHiRes}
-              onChange={(e) => setIsHiRes(e.target.checked)}
-              className="accent-amber-400 w-4 h-4 rounded"
-            />
-            <label htmlFor="hires-check" className="text-xs text-amber-300 font-bold flex items-center gap-1 cursor-pointer">
-              <Sparkles className="w-3.5 h-3.5" />
-              Mark as 24-Bit Studio Master / Hi-Res Lossless
+          {(["title", "artist", "album", "genre"] as const).map((key) => (
+            <label key={key} className="block text-sm capitalize">
+              {key}
+              <input
+                required={key !== "genre"}
+                maxLength={500}
+                className={field}
+                value={draft[key] || ""}
+                onChange={(e) => setDraft({ ...draft, [key]: e.target.value })}
+              />
             </label>
+          ))}
+          <div className="grid grid-cols-2 gap-4">
+            {(["year", "trackNumber"] as const).map((key) => (
+              <label key={key} className="text-sm">
+                {key === "year" ? "Year" : "Track number"}
+                <input
+                  type="number"
+                  min={0}
+                  max={key === "year" ? 9999 : 99999}
+                  className={field}
+                  value={draft[key] ?? ""}
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      [key]:
+                        e.target.value === ""
+                          ? undefined
+                          : Number(e.target.value),
+                    })
+                  }
+                />
+              </label>
+            ))}
           </div>
-
-          <div className="col-span-2">
-            <label className="text-zinc-400 block mb-1">Lyrics & Annotations</label>
+          <label className="block text-sm">
+            Lyrics
             <textarea
-              value={lyrics}
-              onChange={(e) => setLyrics(e.target.value)}
-              placeholder="Paste synced or standard track lyrics..."
-              className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-sky-500 h-24 font-mono text-xs resize-none"
+              maxLength={100000}
+              className={field}
+              value={draft.lyrics || ""}
+              rows={5}
+              onChange={(e) => setDraft({ ...draft, lyrics: e.target.value })}
             />
+          </label>
+          <div className="flex justify-end gap-4">
+            <button type="button" onClick={onClose}>
+              Cancel
+            </button>
+            <button className="bg-indigo-600 px-5 py-3 rounded-xl">
+              Save tags
+            </button>
           </div>
-        </div>
-
-        <div className="flex justify-end gap-2 pt-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 rounded-xl text-xs text-zinc-400 hover:text-white"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            className="px-5 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-white font-medium text-xs flex items-center gap-1.5 shadow-md"
-          >
-            <Save className="w-3.5 h-3.5" />
-            Save Metadata
-          </button>
-        </div>
-      </form>
+        </form>
+      </section>
     </div>
   );
-};
+}

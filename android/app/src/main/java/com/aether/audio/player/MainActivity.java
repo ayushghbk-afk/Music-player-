@@ -9,6 +9,7 @@ import android.webkit.WebSettings;
 import com.aether.audio.player.playback.MusicPlayerPlugin;
 import com.getcapacitor.BridgeActivity;
 
+@androidx.media3.common.util.UnstableApi
 public class MainActivity extends BridgeActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -32,7 +33,7 @@ public class MainActivity extends BridgeActivity {
             settings.setMediaPlaybackRequiresUserGesture(false);
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                settings.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
+                settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
             }
         }
     }

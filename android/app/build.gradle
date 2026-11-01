@@ -13,8 +13,8 @@ android {
         applicationId "com.aether.audio.player"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode 2
+        versionName "1.1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -22,10 +22,22 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (System.getenv('AETHER_KEYSTORE_PATH')) {
+                storeFile file(System.getenv('AETHER_KEYSTORE_PATH'))
+                storePassword System.getenv('AETHER_STORE_PASSWORD')
+                keyAlias System.getenv('AETHER_KEY_ALIAS')
+                keyPassword System.getenv('AETHER_KEY_PASSWORD')
+            }
+        }
+    }
     buildTypes {
         release {
-            minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            minifyEnabled true
+            shrinkResources true
+            signingConfig signingConfigs.release
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
 }
@@ -52,3 +64,14 @@ dependencies {
 }
 
 apply from: 'capacitor.build.gradle'
+
+// A release must never silently produce an unsigned distributable.
+tasks.whenTaskAdded { task ->
+    if (task.name == 'validateSigningRelease') {
+        task.doFirst {
+            ['AETHER_KEYSTORE_PATH','AETHER_STORE_PASSWORD','AETHER_KEY_ALIAS','AETHER_KEY_PASSWORD'].each { name ->
+                if (!System.getenv(name)) throw new GradleException("Missing release signing environment: " + name)
+            }
+        }
+    }
+}

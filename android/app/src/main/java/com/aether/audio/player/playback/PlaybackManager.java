@@ -18,6 +18,10 @@ import androidx.media3.common.MediaItem;
 import androidx.media3.common.MediaMetadata;
 import androidx.media3.common.Player;
 import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.exoplayer.DefaultRenderersFactory;
+import androidx.media3.exoplayer.audio.AudioSink;
+import androidx.media3.exoplayer.audio.DefaultAudioSink;
+import androidx.media3.common.audio.AudioProcessor;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -34,11 +38,13 @@ import java.util.concurrent.CountDownLatch;
  * The previous behavior (prepare -> play -> startService) raced ExoPlayer
  * against the service becoming the foreground lifecycle owner.
  */
+@androidx.media3.common.util.UnstableApi
 public final class PlaybackManager {
 
     public interface Listener {
         void onIsPlayingChanged(boolean isPlaying);
         void onEnded();
+        void onTrackChanged(String trackId);
         void onPosition(long positionMs, long durationMs);
         void onSkipToNext();
         void onSkipToPrevious();
@@ -52,6 +58,7 @@ public final class PlaybackManager {
 
     private final Context appContext;
     private final ExoPlayer exoPlayer;
+    private final AetherDspProcessor dsp = new AetherDspProcessor();
     private final Player player;
     private final TrackStore trackStore;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -65,10 +72,11 @@ public final class PlaybackManager {
     private final Runnable serviceTimeout = new Runnable() {
         @Override
         public void run() {
-            drainPendingCommands();
+            failPendingCommands("Playback service did not start; try again with the app open");
         }
     };
     private long lastPersistAt = 0;
+    private List<MediaItem> queue = new ArrayList<>();
 
     private final Runnable positionTick = new Runnable() {
         @Override
@@ -102,7 +110,15 @@ public final class PlaybackManager {
         // arrive on a bridge thread and the service/MediaSession run on main.
         // ExoPlayer enforces single-thread access (verifyApplicationThread),
         // so everything is funneled to main — see get() and the plugin.
-        exoPlayer = new ExoPlayer.Builder(appContext)
+        DefaultRenderersFactory renderers = new DefaultRenderersFactory(appContext) {
+            @Override protected AudioSink buildAudioSink(Context context, boolean floatOutput, boolean playbackParams) {
+                return new DefaultAudioSink.Builder(context)
+                        .setEnableFloatOutput(false)
+                        .setAudioProcessors(new AudioProcessor[]{dsp})
+                        .build();
+            }
+        };
+        exoPlayer = new ExoPlayer.Builder(appContext, renderers)
                 .setLooper(Looper.getMainLooper())
                 .build();
         exoPlayer.setAudioAttributes(attrs, true);
@@ -110,39 +126,8 @@ public final class PlaybackManager {
         // NETWORK is a superset of LOCAL: holds a partial wake lock during
         // playback (required for local files) plus a Wi-Fi lock for http(s)
         // streams. The screen must NOT be kept awake for audio playback.
-        exoPlayer.setWakeMode(C.WAKE_MODE_NETWORK);
-        player = new ForwardingPlayer(exoPlayer) {
-            @Override
-            public boolean isCommandAvailable(int command) {
-                if (command == COMMAND_SEEK_TO_NEXT
-                        || command == COMMAND_SEEK_TO_NEXT_MEDIA_ITEM
-                        || command == COMMAND_SEEK_TO_PREVIOUS
-                        || command == COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM) {
-                    return true;
-                }
-                return super.isCommandAvailable(command);
-            }
-
-            @Override
-            public void seekToNext() {
-                notifySkipNext();
-            }
-
-            @Override
-            public void seekToNextMediaItem() {
-                notifySkipNext();
-            }
-
-            @Override
-            public void seekToPrevious() {
-                notifySkipPrevious();
-            }
-
-            @Override
-            public void seekToPreviousMediaItem() {
-                notifySkipPrevious();
-            }
-        };
+        exoPlayer.setWakeMode(C.WAKE_MODE_LOCAL);
+        player = exoPlayer;
         player.addListener(new Player.Listener() {
             @Override
             public void onIsPlayingChanged(boolean isPlaying) {
@@ -178,12 +163,11 @@ public final class PlaybackManager {
 
             @Override
             public void onMediaItemTransition(@Nullable MediaItem mediaItem, int reason) {
-                if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
-                    for (Listener listener : copyListeners()) {
-                        listener.onSkipToNext();
-                    }
+                if (mediaItem != null && !mediaItem.mediaId.isEmpty()) {
+                    for (Listener listener : copyListeners()) listener.onTrackChanged(mediaItem.mediaId);
                 }
             }
+
         });
     }
 
@@ -267,9 +251,8 @@ public final class PlaybackManager {
     /**
      * Runs a playback command only after the foreground service is up:
      * service -> media session -> setMediaItem -> prepare -> play.
-     * If the service is already alive the command runs immediately; if the
-     * service cannot be started we still run the command (better one attempt
-     * with no foreground service than silence) after a short timeout.
+     * If the service is already alive the command runs immediately. If it
+     * cannot start, fail explicitly rather than playing without a lifecycle owner.
      */
     private void runWhenServiceReady(final Runnable command) {
         mainHandler.post(() -> {
@@ -282,15 +265,25 @@ public final class PlaybackManager {
             }
             try {
                 Intent intent = new Intent(appContext, MusicPlayerService.class);
-                appContext.startForegroundService(intent);
+                if (android.os.Build.VERSION.SDK_INT >= 26) appContext.startForegroundService(intent);
+                else appContext.startService(intent);
             } catch (IllegalStateException | SecurityException e) {
-                // Foreground-service start not allowed from the current app
-                // state (e.g. Android 12+ background restrictions). Drain now.
-                drainPendingCommands();
+                // Foreground-service start blocked: surface failure without playback.
+                failPendingCommands("Android blocked the playback service: " + e.getMessage());
                 return;
             }
             mainHandler.postDelayed(serviceTimeout, SERVICE_START_TIMEOUT_MS);
         });
+    }
+
+    private void failPendingCommands(String message) {
+        synchronized (pendingCommands) { pendingCommands.clear(); }
+        mainHandler.removeCallbacks(serviceTimeout);
+        for (Listener listener : copyListeners()) listener.onError(message);
+    }
+
+    public void applyEQ(boolean enabled, double[] bands, double preamp, double bass, double treble, double width) {
+        dsp.update(enabled, bands, preamp, bass, treble, width);
     }
 
     private void drainPendingCommands() {
@@ -324,10 +317,23 @@ public final class PlaybackManager {
                     .setUri(uri)
                     .setMediaMetadata(metadata)
                     .build();
-            player.setMediaItem(item, startPositionMs > 0 ? startPositionMs : 0);
+            int index = -1;
+            for(int i=0;i<queue.size();i++) {
+                MediaItem candidate=queue.get(i);
+                if(candidate.localConfiguration != null && candidate.localConfiguration.uri.equals(uri)) { index=i; break; }
+            }
+            if(index>=0) player.setMediaItems(queue,index,Math.max(0,startPositionMs));
+            else player.setMediaItem(item, Math.max(0,startPositionMs));
             player.prepare();
             player.play();
         });
+    }
+
+    public void setQueue(List<MediaItem> items, boolean shuffle, int repeat, boolean autoplay) {
+        queue = new ArrayList<>(items);
+        player.setShuffleModeEnabled(shuffle);
+        player.setRepeatMode(repeat);
+        exoPlayer.setPauseAtEndOfMediaItems(!autoplay);
     }
 
     public void play() {
@@ -335,6 +341,7 @@ public final class PlaybackManager {
     }
 
     public void pause() {
+        synchronized (pendingCommands) { pendingCommands.clear(); }
         player.pause();
         persistPosition();
     }

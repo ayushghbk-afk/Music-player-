@@ -19,6 +19,7 @@ import {
   Layers
 } from 'lucide-react';
 import { Playlist, Track } from '../types';
+import { Artwork } from './Artwork';
 
 interface PlaylistsViewProps {
   playlists: Playlist[];
@@ -171,24 +172,7 @@ export const PlaylistsView: React.FC<PlaylistsViewProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h2 className="text-xl font-bold text-white tracking-wide flex items-center gap-2">
-            <ListMusic className="w-6 h-6 text-sky-400" />
-            <span>Playlists & Curations</span>
-          </h2>
-          <p className="text-xs text-zinc-400">Custom audiophile playlists stored in local vault</p>
-        </div>
-
-        <button
-          onClick={() => setShowCreateModal(true)}
-          className="px-3.5 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-white font-medium text-xs flex items-center justify-center gap-2 shadow-lg shadow-sky-500/20 transition-all active:scale-95 self-start sm:self-auto"
-        >
-          <Plus className="w-4 h-4" />
-          <span>New Playlist</span>
-        </button>
-      </div>
+      <div className="page-intro"><div><div className="eyebrow">SOME THINGS SOUND BETTER TOGETHER</div><h1>Soundtrack your own world.</h1><p>For late nights, slow mornings, and everything in between.</p></div><button onClick={() => setShowCreateModal(true)} className="button-primary"><Plus size={14} /> New playlist</button></div>
 
       {selectedPlaylistId && currentPlaylist ? (
         /* Playlist Detail View */
@@ -348,7 +332,7 @@ export const PlaylistsView: React.FC<PlaylistsViewProps> = ({
 
                       {/* Thumbnail */}
                       <div className="w-9 h-9 rounded-lg bg-zinc-800 flex items-center justify-center text-zinc-400 flex-shrink-0 overflow-hidden border border-white/10">
-                        {track.coverArt && track.coverArt.startsWith('http') ? (
+                        {track.coverArt && (track.coverArt.startsWith('data:image/') || track.coverArt.startsWith('/')) ? (
                           <img src={track.coverArt} alt={track.title} className="w-full h-full object-cover" />
                         ) : (
                           <Music className="w-4 h-4" />
@@ -405,36 +389,12 @@ export const PlaylistsView: React.FC<PlaylistsViewProps> = ({
         </div>
       ) : (
         /* Playlist Grid */
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-          {playlists.map((pl) => (
-            <div
-              key={pl.id}
-              onClick={() => setSelectedPlaylistId(pl.id)}
-              className="bg-zinc-900/60 p-4 rounded-2xl border border-white/5 hover:border-sky-500/30 cursor-pointer transition-all duration-200 group flex items-center justify-between"
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-sky-500/20 to-indigo-500/20 text-sky-400 border border-sky-500/30 flex items-center justify-center group-hover:scale-105 transition-transform flex-shrink-0">
-                  <ListMusic className="w-6 h-6" />
-                </div>
-                <div className="min-w-0">
-                  <h3 className="text-xs font-bold text-white group-hover:text-sky-400 transition-colors truncate">
-                    {pl.name}
-                  </h3>
-                  <p className="text-[11px] text-zinc-400 truncate max-w-[160px]">
-                    {pl.description || 'Custom playlist'}
-                  </p>
-                  <span className="text-[10px] font-mono text-zinc-500">{pl.trackIds.length} tracks</span>
-                </div>
-              </div>
-              <ChevronRight className="w-4 h-4 text-zinc-500 group-hover:text-white transition-colors flex-shrink-0" />
-            </div>
-          ))}
-        </div>
+        <div className="playlist-browser">{playlists.map((pl,index) => <button key={pl.id} className="playlist-browser-card" onClick={() => setSelectedPlaylistId(pl.id)}><div className="playlist-art"><Artwork track={tracks.find(t => pl.trackIds.includes(t.id))} /><div className="playlist-art-shade" /><div className="playlist-art-text"><span className="eyebrow">YOUR PERSONAL CURATION</span><h2>{pl.name}</h2><span>{pl.trackIds.length} tracks</span></div><span className="playlist-art-number">0{index+1}</span><span className="album-play"><ChevronRight size={19} /></span></div><p>{pl.description || 'A collection, made by you.'}</p></button>)}<button className="create-playlist-tile" onClick={() => setShowCreateModal(true)}><Plus size={25} strokeWidth={1} /><strong>A mood. A moment. A mix.</strong><span>Create a new playlist</span></button></div>
       )}
 
       {/* Add Songs Picker Modal */}
       {showAddSongsModal && currentPlaylist && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-4">
+        <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-4">
           <div className="bg-zinc-900 border border-white/10 rounded-3xl p-5 w-full max-w-lg space-y-4 shadow-2xl animate-fadeIn max-h-[85vh] flex flex-col">
             <div className="flex items-center justify-between border-b border-white/10 pb-3">
               <div>
@@ -520,7 +480,7 @@ export const PlaylistsView: React.FC<PlaylistsViewProps> = ({
 
       {/* Create Playlist Modal */}
       {showCreateModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+        <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
           <form
             onSubmit={handleCreateSubmit}
             className="bg-zinc-900 border border-white/10 rounded-2xl p-6 w-full max-w-md space-y-4 shadow-2xl animate-fadeIn"
@@ -569,7 +529,7 @@ export const PlaylistsView: React.FC<PlaylistsViewProps> = ({
 
       {/* Edit Playlist Modal */}
       {showEditModal && currentPlaylist && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+        <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
           <form
             onSubmit={handleEditSubmit}
             className="bg-zinc-900 border border-white/10 rounded-2xl p-6 w-full max-w-md space-y-4 shadow-2xl animate-fadeIn"

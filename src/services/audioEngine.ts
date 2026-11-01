@@ -45,6 +45,17 @@ export class AudioEngine {
   private trebleFilter: BiquadFilterNode | null = null;
   private masterGainNode: GainNode | null = null;
   private isInitialized = false;
+  private outputVolume = 0.85;
+  private lastEQ: EQSettings | null = null;
+  private widthGains: GainNode[] = [];
+  private startPosition = 0;
+  public setStartPosition(seconds: number) { this.startPosition = Math.max(0, seconds); }
+  public setCallbacks(callbacks: AudioEngineCallbacks) {
+    this.onTrackEndedCallback = callbacks.onEnded;
+    this.onTimeUpdateCallback = callbacks.onTimeUpdate;
+    this.onStateChangeCallback = callbacks.onStateChange;
+    this.onErrorCallback = callbacks.onError;
+  }
   private wakeLock: any = null;
   private shouldResumeAfterInterruption = false;
   private backgroundAutoPaused = false;
@@ -60,6 +71,17 @@ export class AudioEngine {
   private onErrorCallback?: (message: string) => void;
 
   // ---- Native mirror (display only; ExoPlayer is the source of truth) --
+  public onNativeTrackChanged?: (id: string) => void;
+  public async syncNativeState() {
+    if (!this.usesNativePlayback()) return null;
+    const state = await AetherPlayer.getState();
+    this.nativePlaying = state.isPlaying; this.nativePosition = state.currentTime; this.nativeDuration = state.duration;
+    return state;
+  }
+  public async configureQueue(tracks: Track[], shuffle: boolean, repeat: 'off' | 'all' | 'one', autoplay: boolean) {
+    if (!this.usesNativePlayback()) return;
+    await AetherPlayer.setQueue({ tracks: tracks.map(({id,title,artist,album}) => ({id,title,artist,album})), shuffle, repeat, autoplay });
+  }
   private nativeListenerAttached = false;
   private nativePosition = 0;
   private nativeDuration = 0;
@@ -88,7 +110,8 @@ export class AudioEngine {
       if (typeof event.currentTime === 'number') this.nativePosition = event.currentTime;
       if (typeof event.duration === 'number' && event.duration > 0) this.nativeDuration = event.duration;
 
-      if (event.type === 'state') {
+      if (event.type === 'track' && event.trackId) { this.onNativeTrackChanged?.(event.trackId); }
+      else if (event.type === 'state') {
         this.nativePlaying = !!event.isPlaying;
         this.onStateChangeCallback?.(this.nativePlaying);
       } else if (event.type === 'time') {
@@ -96,7 +119,7 @@ export class AudioEngine {
       } else if (event.type === 'ended') {
         this.nativePlaying = false;
         this.onStateChangeCallback?.(false);
-        this.onTrackEndedCallback?.();
+        // Native queue and repeat are owned by ExoPlayer, even with no WebView.
       } else if (event.type === 'next') {
         this.onNativeNext?.();
       } else if (event.type === 'previous') {
@@ -131,14 +154,13 @@ export class AudioEngine {
       title: track.title,
       artist: track.artist,
       album: track.album || 'Aether',
+      startPosition: this.startPosition,
     };
 
     const remoteUrl = audioUrl || track.audioUrl;
     if (
       remoteUrl &&
-      (remoteUrl.startsWith('http://') ||
-        remoteUrl.startsWith('https://') ||
-        remoteUrl.startsWith('file://') ||
+      (remoteUrl.startsWith('file://') ||
         remoteUrl.startsWith('content://'))
     ) {
       await AetherPlayer.playUrl({ url: remoteUrl, ...meta });
@@ -425,6 +447,7 @@ export class AudioEngine {
 
       this.preampGainNode = this.audioCtx.createGain();
       this.masterGainNode = this.audioCtx.createGain();
+      this.masterGainNode.gain.value = this.outputVolume;
 
       this.eqFilters = EQ_FREQUENCIES.map((freq, idx) => {
         const filter = this.audioCtx!.createBiquadFilter();
@@ -468,11 +491,24 @@ export class AudioEngine {
       lastNode.connect(this.trebleFilter);
       lastNode = this.trebleFilter;
 
-      lastNode.connect(this.analyserNode);
+      const splitter = this.audioCtx.createChannelSplitter(2);
+      splitter.channelCount = 2;
+      splitter.channelCountMode = "explicit";
+      const merger = this.audioCtx.createChannelMerger(2);
+      lastNode.connect(splitter);
+      this.widthGains = [0,1,2,3].map(() => this.audioCtx!.createGain());
+      // Lout = L*(1+w)/2 + R*(1-w)/2, symmetric for Rout.
+      for (let input = 0; input < 2; input++) for (let output = 0; output < 2; output++) {
+        const gain = this.widthGains[input*2+output];
+        gain.gain.value = input === output ? 1 : 0;
+        splitter.connect(gain, input); gain.connect(merger, 0, output);
+      }
+      merger.connect(this.analyserNode);
       this.analyserNode.connect(this.masterGainNode);
       this.masterGainNode.connect(this.audioCtx.destination);
 
       this.isInitialized = true;
+      if (this.lastEQ) this.applyEQ(this.lastEQ);
     } catch (e) {
       console.warn('Web Audio initialization error:', e);
     }
@@ -492,6 +528,7 @@ export class AudioEngine {
     });
 
     audio.addEventListener('loadedmetadata', () => {
+      if (this.startPosition > 0) { audio.currentTime = Math.min(this.startPosition, audio.duration || this.startPosition); this.startPosition = 0; }
       if (this.currentTrack) {
         this.updateMediaSession(this.currentTrack);
       }
@@ -531,27 +568,10 @@ export class AudioEngine {
       }
     });
 
-    audio.addEventListener('error', async () => {
-      console.warn('Audio element error encountered:', audio.error);
+    audio.addEventListener('error', () => {
+      this.shouldResumeAfterInterruption = false;
       this.onStateChangeCallback?.(false);
-
-      if (this.currentTrack) {
-        try {
-          const blob = await getTrackBlob(this.currentTrack.id);
-          if (blob) {
-            const freshUrl = URL.createObjectURL(blob);
-            this.setAudioSource(freshUrl);
-            audio.removeAttribute('crossorigin');
-            audio.load();
-            await audio.play();
-            return;
-          }
-        } catch (err) {
-          console.error('Failed to reload track blob from IndexedDB:', err);
-        }
-      }
-
-      this.onTrackEndedCallback?.();
+      this.onErrorCallback?.('This audio file is missing, corrupt, or unsupported by this browser. Try another format.');
     });
   }
 
@@ -616,7 +636,7 @@ export class AudioEngine {
 
     if (!urlToPlay) {
       console.warn('No playable URL for track:', track.title);
-      this.onTrackEndedCallback?.();
+      this.onErrorCallback?.('Audio is not present on this device. Re-import the original file.');
       return;
     }
 
@@ -645,7 +665,7 @@ export class AudioEngine {
 
   public play() {
     if (this.usesNativePlayback()) {
-      AetherPlayer.play().catch((err) => console.error('Native play error:', err));
+      AetherPlayer.play().catch((err) => this.onErrorCallback?.('Native play failed: ' + err.message));
       return;
     }
     this.initWebAudio();
@@ -656,7 +676,7 @@ export class AudioEngine {
 
   public pause() {
     if (this.usesNativePlayback()) {
-      AetherPlayer.pause().catch((err) => console.error('Native pause error:', err));
+      AetherPlayer.pause().catch((err) => this.onErrorCallback?.('Native pause failed: ' + err.message));
       return;
     }
     this.cancelBackgroundPlaybackRecovery();
@@ -701,7 +721,9 @@ export class AudioEngine {
       AetherPlayer.setVolume({ volume: clamped }).catch(() => {});
       return;
     }
-    if (this.audioElement) this.audioElement.volume = clamped;
+    this.outputVolume = clamped;
+    if (this.audioElement) this.audioElement.volume = 1;
+    if (this.masterGainNode && this.audioCtx) this.masterGainNode.gain.setTargetAtTime(clamped, this.audioCtx.currentTime, 0.01);
   }
 
   public setPlaybackRate(rate: number) {
@@ -724,6 +746,11 @@ export class AudioEngine {
 
   // Apply Equalizer & Audio FX Settings (web only; native path has no graph)
   public applyEQ(eq: EQSettings) {
+    this.lastEQ = eq;
+    if (this.usesNativePlayback()) {
+      AetherPlayer.applyEQ(eq).catch(error => this.onErrorCallback?.('Native DSP failed: ' + error.message));
+      return;
+    }
     if (!this.isInitialized || !this.audioCtx || this.audioCtx.state === 'closed') return;
 
     if (this.preampGainNode) {
@@ -731,6 +758,10 @@ export class AudioEngine {
       this.preampGainNode.gain.setValueAtTime(preampVal, this.audioCtx.currentTime);
     }
 
+    this.widthGains.forEach((gain, i) => {
+      const width = eq.enabled ? eq.stereoWidth / 100 : 1;
+      gain.gain.setTargetAtTime((i === 0 || i === 3 ? 1 + width : 1 - width) / 2, this.audioCtx!.currentTime, 0.02);
+    });
     this.eqFilters.forEach((filter, idx) => {
       const gainVal = eq.enabled && eq.bands[idx] !== undefined ? eq.bands[idx] : 0;
       filter.gain.setValueAtTime(gainVal, this.audioCtx!.currentTime);

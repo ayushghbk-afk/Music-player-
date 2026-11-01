@@ -1,191 +1,123 @@
 # Aether — Hi-Res Audio Player
 
-A high-resolution offline music player for Android and web, built with React, Capacitor, and native Media3/ExoPlayer playback.
+Offline-first local music player for Web and Android (`com.aether.audio.player`). React 19, TypeScript 5.8, Tailwind 4/Vite 6, Capacitor 8 and Media3 1.5.1. Dependencies are pinned in `package.json` and `package-lock.json`.
 
-## Architecture
+## Studio UI
 
-```
-┌─────────────────────────────────────────────────┐
-│                   React UI                       │
-│  Components · Views · Hooks · State · Themes     │
-└──────────────────────┬──────────────────────────┘
-                       │
-              Capacitor Bridge
-                       │
-         ┌─────────────┴─────────────┐
-         │                           │
-    Android Native              Web Browser
-         │                           │
-  ┌──────┴──────┐              HTMLAudioElement
-  │             │              + Web Audio API
-ExoPlayer  MediaSession        (EQ · Visualizer)
-  │             │
-  └──────┬──────┘
-         │
-MediaSessionService
-(Foreground Service)
-         │
-    ┌────┼────┐
-    ▼    ▼    ▼
- Lock  Notif  BT
-Screen  bar  Controls
-```
+The redesigned interface uses charcoal surfaces, a theme-aware copper accent, bundled landscape cover artwork, and a responsive library/listening-room layout. Album and artist browsing, favorites, the fullscreen player, ten-band EQ, sound assistant, import, backup, playlists, and metadata editing share the visual system. Imported embedded artwork is retained; demo artwork is a presentation layer and does not rewrite saved tags.
 
-### Native Android Playback
+Artwork and application assets are precached in production for offline use. Modal focus management, keyboard-operated EQ ranges, visible focus rings, and reduced-motion support are included. Browser smoke checks covered playback, library controls, secondary screens, and viewport widths 390/768/1280/1536; Android device rendering remains unverified.
 
-On Android, audio playback is **not** handled by the WebView — and never falls back to it. The native layer is the single source of truth for the entire playback lifecycle:
+## Run the web app
 
-- **`PlaybackManager`** — Singleton wrapping ExoPlayer with audio focus, wake lock, headset unplug detection, and position persistence. Playback commands are deferred until the foreground service is alive, guaranteeing the ordering *service → media session → setMediaItem → prepare → play*. The player is owned by the main looper; all plugin access is dispatched to main.
-- **`MusicPlayerService`** — `MediaSessionService` foreground service that keeps audio alive when the app is backgrounded or the screen is locked. `onTaskRemoved()` keeps the service alive while playback is *actively* playing or buffering, and cleanly stops otherwise.
-- **`MusicPlayerPlugin`** — Capacitor plugin bridging React commands (play, pause, seek, volume) to the native player, plus track-store management and a loopback import server
-- **`TrackStore`** — Persistent app-private storage (`filesDir/aether-tracks`) for imported audio; a track is imported once and then streamed from disk forever — never through the JS bridge on the playback path
-- **`LocalTrackServer`** — Loopback-only HTTP server the WebView streams imported files to (raw bytes, no Base64; falls back to chunked plugin imports if unavailable)
-- **`audioEngine.ts`** — Detects Android via `Capacitor.isNativePlatform()` and routes *all* playback commands through the native plugin; native playback state flows back through plugin events. Web `HTMLAudioElement` playback is used in browsers only — on Android a native failure surfaces as an error rather than silently switching engines
+Requires **Node 22.13+** (SQLite uses `node:sqlite`).
 
-### Web Playback
-
-In the browser, playback uses the standard `HTMLAudioElement` with a Web Audio API processing chain:
-
-```
-Source → Preamp → 10-Band EQ → Bass → Treble → Analyser → Master Gain → Output
-```
-
-## Features
-
-### Playback
-- Background playback (foreground service on Android)
-- Media notification with transport controls
-- Lock-screen controls via MediaSession
-- Bluetooth / headset controls
-- Headset unplug auto-pause
-- Audio focus management
-- Resume last position on restart
-- Shuffle and repeat (off / all / one)
-- Playback speed control
-- Gapless playback support
-
-### Library
-- Local file import (FLAC, WAV, MP3, AAC, OGG, ALAC)
-- Offline storage — IndexedDB in the browser, persistent native storage (`filesDir`) on Android
-- Albums view
-- Playlists (create, edit, delete)
-- Favorites
-- Track tag editor
-- Search and sort
-- Hi-Res vault filter
-
-### Audio
-- 10-band parametric equalizer
-- Bass boost and treble boost
-- Stereo width control
-- Preamp gain
-- EQ presets
-- Real-time audio visualizer (bars, waveform, nebula, VU meter, 31-band)
-- Codec and bitrate display
-
-### AI Assistant
-- Sound engineering guidance
-- EQ preset recommendations
-- Audio format comparisons
-- Spatial audio tuning tips
-
-### Sync & Backup
-- Full library export (.aetherjson)
-- Backup restore with deduplication
-- Storage usage stats
-
-## Project Structure
-
-```
-aether/
-├── android/
-│   └── app/src/main/
-│       ├── java/.../player/
-│       │   ├── MainActivity.java
-│       │   └── playback/
-│       │       ├── MusicPlayerPlugin.java    # Capacitor bridge
-│       │       ├── MusicPlayerService.java   # Foreground service
-│       │       └── PlaybackManager.java      # ExoPlayer wrapper
-│       └── AndroidManifest.xml
-├── src/
-│   ├── components/
-│   │   ├── AiAssistantView.tsx
-│   │   ├── AlbumsView.tsx
-│   │   ├── AudioVisualizer.tsx
-│   │   ├── BackupSyncCenter.tsx
-│   │   ├── EqualizerModal.tsx
-│   │   ├── FullscreenPlayer.tsx
-│   │   ├── ImportDropzone.tsx
-│   │   ├── MobileBottomNav.tsx
-│   │   ├── PlayerDock.tsx
-│   │   ├── PlaylistsView.tsx
-│   │   ├── Sidebar.tsx
-│   │   ├── SongList.tsx
-│   │   └── TrackTagEditor.tsx
-│   ├── services/
-│   │   ├── aetherPlayer.ts     # Capacitor plugin interface
-│   │   ├── audioEngine.ts      # Playback engine (native + web)
-│   │   ├── db.ts               # IndexedDB storage
-│   │   └── sampleLibrary.ts    # Demo track generator
-│   ├── types.ts
-│   ├── App.tsx
-│   └── main.tsx
-├── scripts/
-│   └── generate-android-assets.mjs
-├── public/
-│   ├── manifest.json
-│   ├── sw.js
-│   └── pwa-*.png
-├── capacitor.config.json
-├── package.json
-├── vite.config.ts
-└── tsconfig.json
-```
-
-## Build
-
-### Requirements
-
-- Node.js 22+
-- Java JDK 21
-- Android Studio / Android SDK (for APK builds)
-
-### Web Development
-
-```bash
+```sh
 npm ci
+cp .env.example .env
 npm run dev
 ```
 
-### Android APK
+Open port **3000**, or run `PORT=24678 npm run dev` for the current Arena preview. Vite HMR shares the application listener to avoid a conflict with its default port 24678. The server binds `0.0.0.0` and permits Arena's `.e2b.app` preview hosts. Browser API calls are same-origin; no sandbox-local addresses are used in browser code. Android's import-only loopback server is deliberately device-local.
 
-```bash
-npm ci
-npm run android:apk
+```sh
+npm run lint       # tsc --noEmit
+npm test           # 9 tests: schema validation, presentation helpers, real WAV metadata
+npm run build      # Vite client + dist/server.cjs
+npm start          # production Express server
 ```
 
-Output: `android/app/build/outputs/apk/debug/app-debug.apk`
+`npm run build:android` clears/rebuilds `dist` as a web-only bundle before Capacitor sync. Run `npm run build` again before using `npm start` after an Android sync.
 
-### Open in Android Studio
+## Implemented
 
-```bash
-npm run android:open
+- Local import with `music-metadata` ID3/Vorbis/MP4 tags and embedded raster artwork; stable SHA-256 IDs deduplicate repeat imports. Web picker/drop area and Android WebView document picker. No streaming catalog.
+- Songs/search/sort, resolution-based Hi-Res Vault, albums, playlist CRUD, favorites and library-only tag editing including lyrics and track number.
+- Five synthesized 25-second stereo **24-bit/96 kHz PCM WAV** demos generated with `OfflineAudioContext`. These are synthesized demonstrations, not recordings, DSD files, or proof of the device's output resolution.
+- Web HTMLAudioElement with preamp, ten EQ bands, bass/treble shelving, stereo matrix, analyser and master gain; native-only ExoPlayer routing on Android with no WebView playback fallback.
+- Native MediaSessionService, notification transport, audio focus, noisy-device pause, wake mode, persisted UI resume position and a native queue. Service remains alive when a playing task is removed.
+- New native `AetherDspProcessor` with ten biquads, preamp, bass/treble shelves and stereo width in Media3's PCM audio sink. **Android Java is not compiled or device-tested in this environment.** Its DSP output is PCM16, not bit-perfect hi-res output.
+- Themes, desktop sidebar, mobile navigation, fullscreen player and five web visualizer styles.
+- Validated metadata-only `.aetherjson` export/restore, favorites/ID dedupe, settings/EQ restore and browser storage estimates. Audio must be imported separately on a second device.
+- Optional server-side LLM proxy, SQLite snapshot database, expiry and rate limits. No public third-party backup services or hard-coded shared backup IDs.
+- PWA manifest/icons and network-first service worker with build-specific precache of all JS/CSS, including lazy metadata parsers.
+
+## Optional AI and companion server
+
+Set `LLM_API_KEY`, `LLM_MODEL`, and optionally `LLM_BASE_URL` **on the server only**. The latter is an OpenAI-compatible base URL ending in `/v1/`. The provider must support JSON-object responses. `/api/ai` returns **503** without configuration; it never fabricates an LLM answer. Requests include limited track/library/EQ context and up to twelve previous messages, never audio bytes. The model's suggested gains are range-validated before returning them.
+
+This sandbox's outbound-network allowlist does not include LLM providers, so an actual provider completion was not verified here.
+
+For Android, enter your deployed HTTPS companion origin in Backup & Sync. Offline playback and file backups need no server. Set `CORS_ORIGINS` to exact permitted origins, including `https://localhost` for Capacitor. No credential reflection or wildcard API CORS. Set `TRUST_PROXY=1` only behind exactly one trusted reverse proxy that sanitizes forwarded client headers; otherwise rate limiting uses socket IPs.
+
+### API
+
+- `GET /api/health`
+- `POST /api/ai`: 2000-character messages, 10 requests/minute/IP, 30-second upstream timeout
+- `POST /api/backup/save`: schema validation, 5 MB snapshot cap, returns `AE-` plus 32 cryptographically random hex digits and expiry
+- `GET /api/backup/load/:code`: metadata snapshot, expires after seven days
+- Unknown `/api/*`: JSON 404; parser errors: JSON 400/413
+
+Global JSON body limit: 50 MB. Snapshots live in `DATA_DIR/aether.sqlite` with WAL, indexed expiry, hourly cleanup and a 10,000-snapshot admission limit. Persist this directory on deployment and secure it with filesystem permissions/encrypted storage. **Sync codes are bearer secrets, not accounts or end-to-end encryption.** Single-server SQLite is not a multi-region sync architecture.
+
+## Android build / APK
+
+Requires **Java 21**, Android SDK **36**, build tools and access to Google's Android/Maven and Gradle repositories.
+
+```sh
+npm run build:android
+cd android
+./gradlew assembleDebug
 ```
 
-## Tech Stack
+Expected output **after a successful build**:
 
-| Layer | Technology |
-|---|---|
-| UI | React 19, TypeScript, Tailwind CSS 4 |
-| Build | Vite 6, esbuild |
-| Android Shell | Capacitor 8 |
-| Native Playback | Media3 / ExoPlayer 1.5 |
-| Background Audio | MediaSessionService (foreground service) |
-| Web Audio | Web Audio API (EQ, visualizer) |
-| Storage | IndexedDB (via `idb`) |
-| Animations | Motion (Framer Motion) |
-| Icons | Lucide React |
+`android/app/build/outputs/apk/debug/app-debug.apk`
 
-## License
+**No APK was generated in this sandbox.** The Gradle invocation stops because Java/JAVA_HOME is absent; Android SDK is also not provisioned and its download hosts are outside the network allowlist. Do not interpret successful Capacitor sync as a successful native build.
 
-MIT
+The GitHub Actions workflow installs Node 22, Java 21 and SDK 36, runs lint/tests, builds debug + Android lint, and uploads `aether-debug-apk`. The workflow has been written, not executed in this session.
+
+### Signed release
+
+Workflow Dispatch → `Android builds` → enable `release`. Repository secrets:
+
+- `AETHER_KEYSTORE_BASE64`: base64 of your existing release keystore
+- `AETHER_STORE_PASSWORD`
+- `AETHER_KEY_ALIAS`
+- `AETHER_KEY_PASSWORD`
+
+The keystore is decoded into runner temp storage, removed in an always-run cleanup, and never committed. Release builds use minification/resource shrinking, versionCode **2**, versionName **1.1.0**, and signing configuration that fails without signing environment variables. Increment versionCode for each distributed update. Signing was not verified: no keystore was supplied. Debug builds use the standard debug signing identity, not the release key.
+
+## Verification performed
+
+- `npm ci`: passed; audit currently reports **four moderate transitive CLI-tooling advisories** (glob/minimatch/rimraf/Capacitor CLI). No high/critical advisories remained at verification time. Do not use audit's suggested downgrade to Capacitor 4.
+- `npm run lint`: passed.
+- `npm test`: schema sanitization/dedupe/invalid-input tests and real 24-bit WAV encoding and parser-resolution tests passed (five tests total).
+- `npm run build` and `npm run build:android`: passed (bundle-size and dependency-comment warnings only).
+- Dev preview HTML with Arena Host header: HTTP 200.
+- Production API: health, JSON 404, denied foreign CORS, invalid payload, 5 MB cap, save/load including EQ, missing-key AI 503 passed.
+- SQLite snapshot survived an actual process restart; expired snapshot returned 404.
+- `./gradlew assembleDebug`: blocked before compilation (missing Java).
+- Headless Chromium smoke checks passed after extracting the optional browser package's runtime libraries: demo seeding, advancing playback clock, search, metadata export/restore, reload persistence/dedupe, desktop/mobile render and no 390 px horizontal page overflow. No page exceptions were observed. This verifies browser behavior, not physical audio quality or Android playback.
+
+## Known limitations / bugs
+
+1. **Crossfade and forced 96/192 kHz output are not implemented.** The playback panel explicitly identifies this. Source resolution is independent of device output rate.
+2. Gapless toggle is stored but does not select a separate transition engine. Media3's native queue gives best-effort continuous playback; browser transitions can gap. Do not use this as a measured gapless guarantee.
+3. Native analyser data is not bridged; Android visualizers are idle, not measurements of native DSP output.
+4. Native PCM16 DSP can clip with aggressive positive gains and can click when rebuilding coefficients; lower preamp until a limiter and smoothed coefficient transitions are implemented.
+5. A restored metadata record may have no audio. Re-import the identical source file to relink its hash ID. Browser codec support, including ALAC/AAC, varies.
+6. Tag editing changes IndexedDB records, not embedded source-file tags. Import parsing/hash creation can allocate a full-file buffer; the importer rejects files over 1 GB but smaller large files may still exhaust mobile memory.
+7. Browser storage can be evicted. Request persistence/back up metadata and retain original audio; browser storage statistics exclude native private audio.
+8. Hardware back closes import/tag/EQ/fullscreen and returns to Songs, but is not a full multi-view navigation stack; the small playback settings popover is not yet included.
+9. Native queue refresh currently takes effect fully on the next selected track. OEM background policies, Bluetooth devices, task-removal behavior, release shrinking and signing need real-device tests.
+10. Model access requires server deployment/configuration; shared-IP rate limits and distributed deployments require a persistent shared limiter and authentication/budget controls.
+
+See the required feature-by-feature strengths/risks report in `FEATURE_REPORT.md`.
+
+## Assumptions and roadmap
+
+Assumed metadata-only backup (never upload user audio), explicit opt-in AI, OpenAI-compatible provider, single-node persistent SQLite deployment, 25-second synthesized demos and library-only tag edits. No API keys, signing secrets or user music are bundled.
+
+Roadmap: LRC synchronization, sleep timer, queue editor, Android Auto, smart playlists, ReplayGain, folder scanning, future IndexedDB migrations, broader tests, accessibility audit, crossfade, resampling and native analyser telemetry.
