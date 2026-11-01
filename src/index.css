@@ -1698,7 +1698,8 @@ select option {
     display: none;
   }
 }
-@media (max-width: 767px) {
+@media (max-width: 767px),
+  (max-width: 1023px) and (hover: none) and (pointer: coarse) {
   .studio-sidebar {
     display: none;
   }
@@ -3351,7 +3352,8 @@ select option {
     font-size: 37px;
   }
 }
-@media (max-width: 767px) {
+@media (max-width: 767px),
+  (max-width: 1023px) and (hover: none) and (pointer: coarse) {
   .feature-copy h2 {
     font-size: 44px;
   }
@@ -4003,7 +4005,8 @@ select option {
   align-items: center;
   padding-top: 10px;
 }
-@media (max-width: 767px) {
+@media (max-width: 767px),
+  (max-width: 1023px) and (hover: none) and (pointer: coarse) {
   .playlist-browser {
     grid-template-columns: 1fr;
   }

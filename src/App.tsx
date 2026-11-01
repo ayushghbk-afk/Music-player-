@@ -4,6 +4,7 @@ import { Capacitor } from "@capacitor/core";
 import { SplashScreen } from "@capacitor/splash-screen";
 import { StatusBar, Style } from "@capacitor/status-bar";
 import {
+  Search,
   Settings2,
   ArrowUpFromLine,
   AudioLines,
@@ -146,6 +147,7 @@ export default function App() {
   const [theme, setTheme] = useState<ThemeOption>("obsidian");
   const [visualizerMode, setVisualizerMode] = useState<VisualizerMode>("bars");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isMobileMoreOpen, setIsMobileMoreOpen] = useState(false);
 
   const [isFullscreenOpen, setIsFullscreenOpen] = useState(false);
   const [isEQModalOpen, setIsEQModalOpen] = useState(false);
@@ -196,6 +198,14 @@ export default function App() {
     let isActive = true;
 
     CapacitorApp.addListener("backButton", ({ canGoBack }) => {
+      if (isMobileMoreOpen) {
+        setIsMobileMoreOpen(false);
+        return;
+      }
+      if (showPlaybackSettings) {
+        setShowPlaybackSettings(false);
+        return;
+      }
       if (editingTrack) {
         setEditingTrack(null);
         return;
@@ -236,6 +246,8 @@ export default function App() {
       listenerHandle?.remove();
     };
   }, [
+    isMobileMoreOpen,
+    showPlaybackSettings,
     currentView,
     editingTrack,
     isEQModalOpen,
@@ -597,83 +609,92 @@ export default function App() {
       )}
 
       {showPlaybackSettings && (
-        <section
-          ref={settingsRef}
-          role="dialog"
-          aria-modal="true"
-          aria-label="Playback settings"
-          className="playback-settings"
-        >
-          <div className="settings-heading">
-            <h2>Make yourself comfortable.</h2>
-            <button
-              className="icon-button"
-              aria-label="Close playback settings"
-              onClick={() => setShowPlaybackSettings(false)}
-            >
-              <X size={16} />
+        <>
+          <div
+            className="mobile-settings-scrim"
+            aria-hidden="true"
+            onClick={() => setShowPlaybackSettings(false)}
+          />
+          <section
+            ref={settingsRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Playback settings"
+            className="playback-settings"
+          >
+            <div className="settings-heading">
+              <h2>Make yourself comfortable.</h2>
+              <button
+                className="icon-button"
+                aria-label="Close playback settings"
+                onClick={() => setShowPlaybackSettings(false)}
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <label className="block">
+              Speed{" "}
+              <select
+                className="bg-zinc-800 p-2 rounded"
+                value={playerSettings.playbackRate}
+                onChange={(e) => {
+                  const updated = {
+                    ...playerSettings,
+                    playbackRate: Number(e.target.value),
+                  };
+                  setPlayerSettings(updated);
+                  audioEngine.setPlaybackRate(updated.playbackRate);
+                  void setKV("playerSettings", updated);
+                }}
+              >
+                {[0.5, 0.75, 1, 1.25, 1.5, 2].map((n) => (
+                  <option key={n} value={n}>
+                    {n}×
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex gap-2">
+              <input
+                type="checkbox"
+                checked={playerSettings.autoPlayNext}
+                onChange={(e) => {
+                  const updated = {
+                    ...playerSettings,
+                    autoPlayNext: e.target.checked,
+                  };
+                  setPlayerSettings(updated);
+                  void setKV("playerSettings", updated);
+                }}
+              />
+              Autoplay next
+            </label>
+            <label className="flex gap-2">
+              <input
+                type="checkbox"
+                checked={gaplessEnabled}
+                onChange={(e) => {
+                  const updated = {
+                    ...playerSettings,
+                    gapless: e.target.checked,
+                  };
+                  setGaplessEnabled(updated.gapless);
+                  setPlayerSettings(updated);
+                  void setKV("playerSettings", updated);
+                }}
+              />
+              Prefer gapless (native, best effort)
+            </label>
+            <p className="text-xs text-zinc-400">
+              Crossfade and forced 96/192 kHz output are not supported in this
+              build. Output rate is chosen by the browser or Android mixer, not
+              the source badge. Gapless is best-effort on native only.
+            </p>
+            <button onClick={() => setShowPlaybackSettings(false)}>
+              Close
             </button>
-          </div>
-          <label className="block">
-            Speed{" "}
-            <select
-              className="bg-zinc-800 p-2 rounded"
-              value={playerSettings.playbackRate}
-              onChange={(e) => {
-                const updated = {
-                  ...playerSettings,
-                  playbackRate: Number(e.target.value),
-                };
-                setPlayerSettings(updated);
-                audioEngine.setPlaybackRate(updated.playbackRate);
-                void setKV("playerSettings", updated);
-              }}
-            >
-              {[0.5, 0.75, 1, 1.25, 1.5, 2].map((n) => (
-                <option key={n} value={n}>
-                  {n}×
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex gap-2">
-            <input
-              type="checkbox"
-              checked={playerSettings.autoPlayNext}
-              onChange={(e) => {
-                const updated = {
-                  ...playerSettings,
-                  autoPlayNext: e.target.checked,
-                };
-                setPlayerSettings(updated);
-                void setKV("playerSettings", updated);
-              }}
-            />
-            Autoplay next
-          </label>
-          <label className="flex gap-2">
-            <input
-              type="checkbox"
-              checked={gaplessEnabled}
-              onChange={(e) => {
-                const updated = {
-                  ...playerSettings,
-                  gapless: e.target.checked,
-                };
-                setGaplessEnabled(updated.gapless);
-                setPlayerSettings(updated);
-                void setKV("playerSettings", updated);
-              }}
-            />
-            Prefer gapless (native, best effort)
-          </label>
-          <p className="text-xs text-zinc-400">
-            Crossfade and forced 96/192 kHz output are not supported in this
-            build. Output rate is chosen by the browser or Android mixer, not
-            the source badge. Gapless is best-effort on native only.
-          </p>
-          <button onClick={() => setShowPlaybackSettings(false)}>Close</button>
-        </section>
+          </section>
+        </>
       )}
       {/* Upper Main Workspace */}
       <div className="app-workspace">
@@ -704,13 +725,40 @@ export default function App() {
               <AudioLines size={20} className="mobile-brand" />
               <span className="desktop-breadcrumb">Your collection</span>
               <ChevronRight size={12} className="desktop-breadcrumb" />
-              <strong>{viewLabels[currentView] || "Music library"}</strong>
+              <strong className="desktop-view-title">
+                {viewLabels[currentView] || "Music library"}
+              </strong>
+              <div className="mobile-wordmark">
+                <strong>
+                  aether<span>®</span>
+                </strong>
+                <small>THE ART OF LISTENING</small>
+              </div>
             </div>
             <div className="header-actions">
               <span className="local-status">
                 <ShieldCheck size={13} /> Local & personal
               </span>
               <span className="header-divider" />
+              <button
+                className="icon-button mobile-search-trigger"
+                aria-label="Search your music"
+                onClick={() => {
+                  setCurrentView("songs");
+                  requestAnimationFrame(() => {
+                    const field = document.querySelector<HTMLInputElement>(
+                      'input[aria-label="Search library"]',
+                    );
+                    field?.scrollIntoView({
+                      behavior: "smooth",
+                      block: "center",
+                    });
+                    field?.focus({ preventScroll: true });
+                  });
+                }}
+              >
+                <Search size={20} />
+              </button>
               <button
                 className="icon-button settings-trigger"
                 title="Playback settings"
@@ -722,6 +770,7 @@ export default function App() {
               </button>
               <button
                 className="header-import"
+                aria-label="Import music"
                 onClick={() => setIsImportModalOpen(true)}
               >
                 <ArrowUpFromLine size={14} />
@@ -743,6 +792,7 @@ export default function App() {
                     tracks={tracks}
                     onPlay={handlePlayTrack}
                     onViewAlbums={() => setCurrentView("albums")}
+                    onViewHiRes={() => setCurrentView("hires")}
                     onImport={() => setIsImportModalOpen(true)}
                   />
                   <div className="section-heading library-heading">
@@ -1024,6 +1074,16 @@ export default function App() {
         hiResCount={hiResTracks.length}
         totalTrackCount={tracks.length}
         eqEnabled={eqSettings.enabled}
+        isMoreOpen={isMobileMoreOpen}
+        onMoreOpenChange={setIsMobileMoreOpen}
+        onOpenSettings={() => setShowPlaybackSettings(true)}
+        theme={theme}
+        onSelectTheme={(theme) => {
+          setTheme(theme);
+          const updated = { ...playerSettings, theme };
+          setPlayerSettings(updated);
+          void setKV("playerSettings", updated);
+        }}
       />
     </div>
   );

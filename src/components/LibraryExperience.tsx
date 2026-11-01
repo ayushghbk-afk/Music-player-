@@ -19,11 +19,13 @@ interface LibraryExperienceProps {
   onPlay: (track: Track) => void;
   onViewAlbums: () => void;
   onImport: () => void;
+  onViewHiRes: () => void;
 }
 export function LibraryExperience({
   tracks,
   onPlay,
   onViewAlbums,
+  onViewHiRes,
   onImport,
 }: LibraryExperienceProps) {
   const albums = tracks
@@ -37,14 +39,28 @@ export function LibraryExperience({
       <div className="page-intro">
         <div>
           <div className="eyebrow">YOUR SPACE. YOUR SOUND.</div>
-          <h1>
+          <h1 className="desktop-library-title">
             A little closer to the music<span>.</span>
+          </h1>
+          <h1 className="mobile-library-title">
+            Find your
+            <br />
+            kind of quiet<span>.</span>
           </h1>
           <p>A collection that’s entirely yours. Every detail, every note.</p>
         </div>
         <span className="offline-indicator">
           <i /> Listening, uninterrupted
         </span>
+      </div>
+      <div className="mobile-collection-summary">
+        <span>
+          <ShieldCheck size={13} /> YOUR OFFLINE COLLECTION
+        </span>
+        <strong>
+          {tracks.length} tracks <i>·</i>{" "}
+          {new Set(tracks.map((t) => t.album)).size} albums
+        </strong>
       </div>
       <section className="feature-banner">
         <img
@@ -64,8 +80,7 @@ export function LibraryExperience({
           </h2>
           <p>
             Rediscover the details you fell in love with.
-            <br />
-            Your music, beautifully uncompromised.
+            <br /> Your music, beautifully uncompromised.
           </p>
           <div className="feature-buttons">
             <button
@@ -88,6 +103,22 @@ export function LibraryExperience({
           AETHER ORIGINALS <span>VOL. 01 — SOUNDSCAPES</span>
         </div>
       </section>
+      <div className="mobile-library-shortcuts">
+        <button onClick={onViewAlbums}>
+          <Disc3 size={18} />
+          <span>Albums</span>
+          <ArrowUpRight size={13} />
+        </button>
+        <button onClick={onViewHiRes}>
+          <AudioLines size={18} />
+          <span>Hi-res audio</span>
+          <ArrowUpRight size={13} />
+        </button>
+        <button onClick={onImport}>
+          <ArrowUpRight size={18} />
+          <span>Import music</span>
+        </button>
+      </div>
       <section className="album-section">
         <div className="section-heading">
           <div>
