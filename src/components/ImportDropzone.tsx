@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import {
   Upload,
   X,
@@ -8,6 +8,8 @@ import {
   LoaderCircle,
 } from "lucide-react";
 import { useDialogFocus } from "./useDialogFocus";
+import { getAllTracks, saveTrack } from "../services/db";
+import { readLyricsFile, findLyricsTarget } from "../services/lyrics";
 import { importAudioFile } from "../services/importTracks";
 
 export function ImportDropzone({
@@ -17,7 +19,7 @@ export function ImportDropzone({
 }: {
   isOpen: boolean;
   onClose: () => void;
-  onImportComplete: () => void;
+  onImportComplete: () => void | Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
   const [log, setLog] = useState<string[]>([]);
@@ -25,23 +27,69 @@ export function ImportDropzone({
   const dialogRef = useDialogFocus(isOpen, () => {
     if (!busy) onClose();
   });
+  const importing = useRef(false);
+  const [progress, setProgress] = useState({
+    completed: 0,
+    total: 0,
+    name: "",
+    stage: "",
+  });
   async function importFiles(files: FileList | File[]) {
-    if (busy) return;
+    if (importing.current) return;
+    const list = Array.from(files);
+    if (!list.length) return;
+    importing.current = true;
     setBusy(true);
     setLog([]);
-    for (const file of Array.from(files)) {
-      try {
-        const track = await importAudioFile(file);
-        setLog((l) => [...l, `Imported ${track.title}`]);
-      } catch (e) {
-        setLog((l) => [
-          ...l,
-          `${file.name}: ${e instanceof Error ? e.message : "Import failed"}`,
-        ]);
+    const audio = list.filter((file) => !/\.(lrc|txt)$/i.test(file.name));
+    const sidecars = list.filter((file) => /\.(lrc|txt)$/i.test(file.name));
+    let completed = 0;
+    try {
+      for (const file of [...audio, ...sidecars]) {
+        setProgress({
+          completed,
+          total: list.length,
+          name: file.name,
+          stage: "Opening file",
+        });
+        try {
+          if (/\.(lrc|txt)$/i.test(file.name)) {
+            setProgress((p) => ({
+              ...p,
+              stage: "Matching lyrics to your library",
+            }));
+            const lyrics = await readLyricsFile(file);
+            const track = findLyricsTarget(file.name, await getAllTracks());
+            await saveTrack({ ...track, lyrics });
+            setLog((l) => [...l, `Lyrics imported for ${track.title}`]);
+          } else {
+            const track = await importAudioFile(file, (stage) =>
+              setProgress((p) => ({ ...p, stage })),
+            );
+            setLog((l) => [...l, `Ready: ${track.title}`]);
+          }
+        } catch (e) {
+          setLog((l) => [
+            ...l,
+            `${file.name}: ${e instanceof Error ? e.message : "Import failed"}`,
+          ]);
+        }
+        completed++;
+        setProgress((p) => ({ ...p, completed }));
+        // Allow progress to paint between files, including very small ones.
+        await new Promise((resolve) => setTimeout(resolve, 0));
       }
+      setProgress((p) => ({ ...p, stage: "Refreshing your collection" }));
+      await onImportComplete();
+    } catch (e) {
+      setLog((l) => [
+        ...l,
+        `Refresh failed: ${e instanceof Error ? e.message : "Try reopening the library"}`,
+      ]);
+    } finally {
+      importing.current = false;
+      setBusy(false);
     }
-    setBusy(false);
-    onImportComplete();
   }
   if (!isOpen) return null;
   return (
@@ -96,11 +144,11 @@ export function ImportDropzone({
             <Upload size={28} strokeWidth={1.4} />
           )}
           <strong>
-            {busy ? "Finding every detail…" : "Drop the needle. Or your files."}
+            {busy ? progress.stage : "Drop the needle. Or your files."}
           </strong>
           <span>
             {busy
-              ? "Reading tags and saving audio locally."
+              ? `${progress.completed} / ${progress.total} complete · ${progress.name}`
               : "Drag your audio here, or browse your files"}
           </span>
           <span className="browse-file-button">
@@ -111,7 +159,7 @@ export function ImportDropzone({
             className="sr-only"
             type="file"
             multiple
-            accept="audio/*,.flac,.alac,.m4a,.ogg,.wav"
+            accept="audio/*,.flac,.alac,.m4a,.ogg,.wav,.lrc,.txt"
             disabled={busy}
             onChange={(e) => {
               if (e.target.files) void importFiles(e.target.files);
@@ -119,6 +167,18 @@ export function ImportDropzone({
             }}
           />
         </label>
+        {busy && (
+          <div className="import-progress" role="status" aria-live="polite">
+            <progress
+              aria-label="Files processed"
+              value={progress.completed}
+              max={progress.total || 1}
+            />
+            <span>
+              {progress.stage} · {progress.completed} of {progress.total} files
+            </span>
+          </div>
+        )}
         <div className="import-formats">
           <FileAudio size={13} /> FLAC · WAV · MP3 · AAC · OGG · ALAC / M4A
         </div>
@@ -128,7 +188,9 @@ export function ImportDropzone({
             Never uploaded. Always yours.
             <small>
               Tags are read on-device. Duplicate files are recognized
-              automatically. Library tag edits don’t change the original file.
+              automatically. Add matching-name .lrc / .txt files alongside
+              audio, or import lyrics from a track’s editor. Original files stay
+              untouched.
             </small>
           </span>
         </p>

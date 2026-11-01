@@ -1,6 +1,7 @@
-import React, { useEffect, useRef } from 'react';
-import { audioEngine } from '../services/audioEngine';
-import { VisualizerMode } from '../types';
+import React, { useEffect, useRef } from "react";
+import { audioEngine } from "../services/audioEngine";
+import { dbfs } from "../services/dsp";
+import type { VisualizerMode } from "../types";
 
 interface AudioVisualizerProps {
   mode: VisualizerMode;
@@ -8,251 +9,213 @@ interface AudioVisualizerProps {
   className?: string;
   accentColor?: string;
 }
-
 export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
   mode,
   isPlaying,
-  className = '',
-  accentColor = '#e5a68c', // Warm studio copper
+  className = "",
+  accentColor,
 }) => {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const animationFrameRef = useRef<number | null>(null);
-
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const freqArray = new Uint8Array(128);
-    const timeDomainArray = new Uint8Array(128);
-
-    const render = () => {
-      audioEngine.getAnalyserData(freqArray, timeDomainArray);
-
-      // Handle high-DPI canvases
-      const width = canvas.width;
-      const height = canvas.height;
-
-      ctx.clearRect(0, 0, width, height);
-
-      if (mode === 'bars') {
-        // Glowing Frequency Bars
-        const barCount = 48;
-        const barWidth = (width / barCount) * 0.7;
-        const gap = (width / barCount) * 0.3;
-
-        for (let i = 0; i < barCount; i++) {
-          const val = freqArray[i % freqArray.length] / 255;
-          const barHeight = val * (height * 0.85);
-
-          const x = i * (barWidth + gap);
-          const y = height - barHeight;
-
-          const gradient = ctx.createLinearGradient(0, height, 0, 0);
-          gradient.addColorStop(0, accentColor);
-          gradient.addColorStop(0.7, '#b88e78');
-          gradient.addColorStop(1, '#ead2b5');
-
-          ctx.fillStyle = gradient;
-          ctx.beginPath();
-          ctx.roundRect(x, y, barWidth, barHeight, [4, 4, 0, 0]);
-          ctx.fill();
-
-          // Peak light cap
-          ctx.fillStyle = '#ffffff';
-          ctx.fillRect(x, Math.max(0, y - 3), barWidth, 2);
-        }
-      } else if (mode === 'wave') {
-        // Oscilloscope Waveform
-        ctx.lineWidth = 2.5;
-        ctx.strokeStyle = accentColor;
-        ctx.shadowBlur = 12;
-        ctx.shadowColor = accentColor;
-
-        ctx.beginPath();
-        const sliceWidth = width / timeDomainArray.length;
-        let x = 0;
-
-        for (let i = 0; i < timeDomainArray.length; i++) {
-          const v = timeDomainArray[i] / 128.0;
-          const y = (v * height) / 2;
-
-          if (i === 0) {
-            ctx.moveTo(x, y);
-          } else {
-            ctx.lineTo(x, y);
-          }
-          x += sliceWidth;
-        }
-
-        ctx.lineTo(width, height / 2);
-        ctx.stroke();
-        ctx.shadowBlur = 0;
-      } else if (mode === 'nebula') {
-        // Circular Spectrum Nebula
-        const centerX = width / 2;
-        const centerY = height / 2;
-        const radius = Math.min(centerX, centerY) * 0.45;
-
-        const points = 64;
-        const angleStep = (Math.PI * 2) / points;
-
-        ctx.save();
-        ctx.translate(centerX, centerY);
-
-        // Core glow
-        const radGrad = ctx.createRadialGradient(0, 0, 10, 0, 0, radius * 1.5);
-        radGrad.addColorStop(0, `${accentColor}33`);
-        radGrad.addColorStop(1, 'transparent');
-        ctx.fillStyle = radGrad;
-        ctx.beginPath();
-        ctx.arc(0, 0, radius * 1.5, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.strokeStyle = accentColor;
-        ctx.lineWidth = 2;
-        ctx.shadowBlur = 15;
-        ctx.shadowColor = accentColor;
-
-        ctx.beginPath();
-        for (let i = 0; i <= points; i++) {
-          const val = freqArray[i % freqArray.length] / 255;
-          const r = radius + val * 45;
-          const angle = i * angleStep;
-          const px = Math.cos(angle) * r;
-          const py = Math.sin(angle) * r;
-
-          if (i === 0) {
-            ctx.moveTo(px, py);
-          } else {
-            ctx.lineTo(px, py);
-          }
-        }
-        ctx.closePath();
-        ctx.stroke();
-        ctx.restore();
-        ctx.shadowBlur = 0;
-      } else if (mode === '31-band') {
-        // High-Density 31-Band Studio RTA
-        const bands = 31;
-        const bWidth = width / bands;
-
-        for (let i = 0; i < bands; i++) {
-          const val = freqArray[Math.floor((i / bands) * freqArray.length)] / 255;
-          const bHeight = val * (height * 0.9);
-
-          const x = i * bWidth;
-          const y = height - bHeight;
-
-          // Band bar background
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
-          ctx.fillRect(x + 2, 0, bWidth - 4, height);
-
-          // LED segment block effect
-          const segmentCount = 16;
-          const segHeight = height / segmentCount;
-          const activeSegments = Math.floor(val * segmentCount);
-
-          for (let s = 0; s < activeSegments; s++) {
-            const segY = height - (s + 1) * segHeight;
-            let col = accentColor;
-            if (s > 13) col = '#ef4444'; // Red clip warning
-            else if (s > 10) col = '#f59e0b'; // Amber warm
-
-            ctx.fillStyle = col;
-            ctx.fillRect(x + 3, segY + 1, bWidth - 6, segHeight - 2);
-          }
-        }
-      } else if (mode === 'vu-meter') {
-        // Vintage Dual Needle VU Meters
-        const meterWidth = width / 2 - 10;
-        const drawVUMeter = (ox: number, title: string, level: number) => {
-          ctx.save();
-          ctx.translate(ox, 0);
-
-          // Meter face plate
-          ctx.fillStyle = '#0f172a';
-          ctx.strokeStyle = '#334155';
-          ctx.lineWidth = 1;
-          ctx.beginPath();
-          ctx.roundRect(0, 0, meterWidth, height, 8);
-          ctx.fill();
-          ctx.stroke();
-
-          // Scale Arc
-          const cx = meterWidth / 2;
-          const cy = height + 10;
-          const r = height * 0.85;
-
-          ctx.strokeStyle = '#94a3b8';
+    const canvas = canvasRef.current,
+      context = canvas?.getContext("2d");
+    if (!canvas || !context) return;
+    const ctx = context;
+    const frequency = new Uint8Array(256),
+      waveform = new Uint8Array(512);
+    let frame = 0,
+      last = 0,
+      left = 0,
+      right = 0,
+      settle = 45;
+    let width = 0,
+      height = 0;
+    const render = (now = performance.now()) => {
+      const dt = Math.min(0.1, Math.max(0.001, (now - last) / 1000 || 0.033));
+      last = now;
+      if (!document.hidden && width && height) {
+        const color =
+          accentColor ||
+          getComputedStyle(canvas).getPropertyValue("--accent").trim() ||
+          "#e5a68c";
+        const meter = audioEngine.getMeterLevels();
+        const targetL = isPlaying ? meter.left : 0,
+          targetR = isPlaying ? meter.right : 0;
+        left +=
+          (targetL - left) *
+          (1 - Math.exp(-dt / (targetL > left ? 0.055 : 0.32)));
+        right +=
+          (targetR - right) *
+          (1 - Math.exp(-dt / (targetR > right ? 0.055 : 0.32)));
+        ctx.clearRect(0, 0, width, height);
+        const effectiveMode = audioEngine.isNative() ? "vu-meter" : mode;
+        if (effectiveMode === "vu-meter") {
+          const gap = 10,
+            mw = (width - gap) / 2;
+          const draw = (x: number, label: string, rms: number) => {
+            ctx.save();
+            ctx.translate(x, 0);
+            const face = ctx.createLinearGradient(0, 0, 0, height);
+            face.addColorStop(0, "#232326");
+            face.addColorStop(1, "#121315");
+            ctx.fillStyle = face;
+            ctx.strokeStyle = color;
+            ctx.globalAlpha = 0.85;
+            ctx.beginPath();
+            ctx.roundRect(0.5, 0.5, mw - 1, height - 1, 10);
+            ctx.fill();
+            ctx.globalAlpha = 0.35;
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = color;
+            ctx.textAlign = "center";
+            ctx.font = `500 ${mw < 150 ? 8 : 10}px monospace`;
+            ctx.fillText(`${label} · RMS dBFS`, mw / 2, 20);
+            const cx = mw / 2,
+              cy = height * 0.78,
+              r = Math.min(mw * 0.48, height * 0.53);
+            const start = Math.PI * 1.13,
+              range = Math.PI * 0.74;
+            ctx.strokeStyle = "#ffffff35";
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, start, start + range);
+            ctx.stroke();
+            for (const tick of [-60, -36, -24, -12, -6, 0]) {
+              const angle = start + ((tick + 60) / 60) * range;
+              ctx.strokeStyle = tick >= -6 ? "#e88273" : "#ffffff65";
+              ctx.beginPath();
+              ctx.moveTo(
+                cx + Math.cos(angle) * (r - 5),
+                cy + Math.sin(angle) * (r - 5),
+              );
+              ctx.lineTo(cx + Math.cos(angle) * r, cy + Math.sin(angle) * r);
+              ctx.stroke();
+              if (mw >= 140) {
+                ctx.fillStyle = "#c2bdba";
+                ctx.font = "8px monospace";
+                ctx.fillText(
+                  String(tick),
+                  cx + Math.cos(angle) * (r + 10),
+                  cy + Math.sin(angle) * (r + 10),
+                );
+              }
+            }
+            const angle =
+              start + Math.min(1, Math.max(0, (dbfs(rms) + 60) / 60)) * range;
+            ctx.strokeStyle = meter.overloaded ? "#ed8575" : color;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            ctx.lineTo(
+              cx + Math.cos(angle) * (r - 9),
+              cy + Math.sin(angle) * (r - 9),
+            );
+            ctx.stroke();
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.font = "10px monospace";
+            ctx.fillText(
+              rms < 0.001 ? "−∞" : dbfs(rms).toFixed(1),
+              cx,
+              height - 12,
+            );
+            ctx.restore();
+          };
+          draw(0, "LEFT", left);
+          draw(mw + gap, "RIGHT", right);
+        } else {
+          audioEngine.getAnalyserData(frequency, waveform);
+          ctx.strokeStyle = color;
+          ctx.fillStyle = color;
           ctx.lineWidth = 2;
-          ctx.beginPath();
-          ctx.arc(cx, cy, r, Math.PI * 1.25, Math.PI * 1.75);
-          ctx.stroke();
-
-          // Label
-          ctx.fillStyle = '#64748b';
-          ctx.font = '10px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.fillText(title, cx, 20);
-
-          // Needle angle calculation
-          const targetAngle = Math.PI * 1.25 + level * (Math.PI * 0.5);
-          const nx = cx + Math.cos(targetAngle) * (r - 10);
-          const ny = cy + Math.sin(targetAngle) * (r - 10);
-
-          ctx.strokeStyle = level > 0.85 ? '#ef4444' : '#38bdf8';
-          ctx.lineWidth = 2.5;
-          ctx.shadowBlur = level > 0.85 ? 8 : 0;
-          ctx.shadowColor = '#ef4444';
-          ctx.beginPath();
-          ctx.moveTo(cx, cy - 10);
-          ctx.lineTo(nx, ny);
-          ctx.stroke();
-
-          ctx.restore();
-        };
-
-        const leftAvg = (freqArray[5] + freqArray[10] + freqArray[15]) / (3 * 255);
-        const rightAvg = (freqArray[8] + freqArray[18] + freqArray[28]) / (3 * 255);
-
-        drawVUMeter(0, 'LEFT CHANNEL (CH-1)', leftAvg);
-        drawVUMeter(width / 2 + 10, 'RIGHT CHANNEL (CH-2)', rightAvg);
+          if (effectiveMode === "wave") {
+            ctx.beginPath();
+            waveform.forEach((value, i) => {
+              const x = (i / (waveform.length - 1)) * width,
+                y = height / 2 + ((value - 128) / 128) * height * 0.45;
+              if (i) ctx.lineTo(x, y);
+              else ctx.moveTo(x, y);
+            });
+            ctx.stroke();
+          } else if (effectiveMode === "nebula") {
+            const radius = Math.min(width, height) * 0.25;
+            ctx.beginPath();
+            for (let i = 0; i <= 96; i++) {
+              const angle = (i / 96) * Math.PI * 2,
+                r = radius * (1 + (frequency[i % 96] / 255) * 0.8),
+                x = width / 2 + Math.cos(angle) * r,
+                y = height / 2 + Math.sin(angle) * r;
+              if (i) ctx.lineTo(x, y);
+              else ctx.moveTo(x, y);
+            }
+            ctx.closePath();
+            ctx.stroke();
+          } else {
+            const count = effectiveMode === "31-band" ? 31 : 48,
+              bw = width / count;
+            for (let i = 0; i < count; i++) {
+              const value = isPlaying
+                ? frequency[
+                    Math.floor((i / count) ** 2 * (frequency.length - 1))
+                  ] / 255
+                : 0;
+              const h = Math.max(1, value * height * 0.9);
+              ctx.globalAlpha = 0.35 + value * 0.65;
+              ctx.fillRect(i * bw + 1, height - h, Math.max(1, bw - 3), h);
+            }
+            ctx.globalAlpha = 1;
+          }
+        }
       }
-
-      if (isPlaying) {
-        animationFrameRef.current = requestAnimationFrame(render);
-      }
+      if (isPlaying || settle-- > 0) frame = requestAnimationFrame(render);
     };
-
-    render();
-
+    const resize = () => {
+      const rect = canvas.getBoundingClientRect(),
+        ratio = Math.min(2, window.devicePixelRatio || 1);
+      width = rect.width;
+      height = rect.height;
+      canvas.width = Math.round(width * ratio);
+      canvas.height = Math.round(height * ratio);
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      cancelAnimationFrame(frame);
+      settle = 45;
+      frame = requestAnimationFrame(render);
+    };
+    const observer = new ResizeObserver(resize);
+    observer.observe(canvas);
+    resize();
+    const themeObserver = new MutationObserver(() => {
+      cancelAnimationFrame(frame);
+      settle = 45;
+      frame = requestAnimationFrame(render);
+    });
+    const app = canvas.closest(".aether-app");
+    if (app)
+      themeObserver.observe(app, {
+        attributes: true,
+        attributeFilter: ["style", "class"],
+      });
     return () => {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-      }
+      observer.disconnect();
+      themeObserver.disconnect();
+      cancelAnimationFrame(frame);
     };
   }, [mode, isPlaying, accentColor]);
-
-  // Handle Resize
-  useEffect(() => {
-    const handleResize = () => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const rect = canvas.getBoundingClientRect();
-      canvas.width = rect.width;
-      canvas.height = rect.height;
-    };
-
-    handleResize();
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
   return (
     <div className={`relative w-full h-full overflow-hidden ${className}`}>
-      <canvas ref={canvasRef} className="w-full h-full block" />
+      <canvas
+        ref={canvasRef}
+        className="w-full h-full block"
+        role="img"
+        aria-label={
+          mode === "vu-meter" || audioEngine.isNative()
+            ? "Analog stereo VU meters · measured RMS in dBFS"
+            : "Live audio visualization"
+        }
+      />
     </div>
   );
 };

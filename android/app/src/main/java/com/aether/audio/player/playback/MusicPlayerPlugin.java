@@ -274,7 +274,9 @@ public class MusicPlayerPlugin extends Plugin implements PlaybackManager.Listene
                 Math.max(-12,Math.min(12,call.getDouble("preamp", 0d))),
                 Math.max(0,Math.min(100,call.getDouble("bassBoost", 0d))),
                 Math.max(0,Math.min(100,call.getDouble("trebleBoost", 0d))),
-                Math.max(0,Math.min(200,call.getDouble("stereoWidth", 100d))));
+                Math.max(0,Math.min(200,call.getDouble("stereoWidth", 100d))),
+                call.getBoolean("autoHeadroom",true),call.getBoolean("peakProtection",true),
+                Math.max(-1,Math.min(1,call.getDouble("balance",0d))),call.getBoolean("mono",false));
             call.resolve();
         } catch(Exception error) { call.reject("Invalid DSP settings", error); }
     }
@@ -303,6 +305,13 @@ public class MusicPlayerPlugin extends Plugin implements PlaybackManager.Listene
     }
 
     @Override
+    public void onBufferingChanged(boolean buffering) {
+        JSObject data=currentState();
+        data.put("type",buffering ? "buffering" : "ready");
+        notifyListeners("playerEvent",data);
+    }
+
+    @Override
     public void onEnded() {
         JSObject data = currentState();
         data.put("type", "ended");
@@ -311,7 +320,13 @@ public class MusicPlayerPlugin extends Plugin implements PlaybackManager.Listene
 
     @Override
     public void onPosition(long positionMs, long durationMs) {
-        JSObject data = new JSObject();
+        JSObject data = currentState();
+        AetherDspProcessor.Meter meter=manager.getMeter();
+        double volume=manager.getVolume();
+        JSObject levels=new JSObject();
+        levels.put("left",meter.left*volume); levels.put("right",meter.right*volume);
+        levels.put("peak",meter.peak*volume); levels.put("overloaded",meter.overloaded);
+        data.put("meter",levels);
         data.put("type", "time");
         data.put("currentTime", positionMs / 1000.0);
         data.put("duration", durationMs / 1000.0);
@@ -346,7 +361,7 @@ public class MusicPlayerPlugin extends Plugin implements PlaybackManager.Listene
         String artist = call.getString("artist", "Unknown artist");
         String album = call.getString("album", "Aether");
         Double start = call.getDouble("startPosition", 0d);
-        manager.playUri(uri, title, artist, album, (long) (start * 1000));
+        manager.playUri(uri, title, artist, album, (long) (start * 1000), call.getString("trackId", ""));
     }
 
     private JSObject currentState() {

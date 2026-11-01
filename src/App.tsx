@@ -11,6 +11,7 @@ import {
   ChevronRight,
   ShieldCheck,
   X,
+  LoaderCircle,
 } from "lucide-react";
 import {
   Track,
@@ -35,7 +36,9 @@ import {
   INITIAL_SAMPLE_TRACKS,
   generateSynthesizedTrackBlob,
 } from "./services/sampleLibrary";
-import { audioEngine } from "./services/audioEngine";
+import { audioEngine, type PlaybackStatus } from "./services/audioEngine";
+import { useArtworkTheme } from "./services/artworkTheme";
+import { eqSchema, settingsSchema } from "./services/backupSchema";
 
 import { Sidebar, NavView } from "./components/Sidebar";
 import { useDialogFocus } from "./components/useDialogFocus";
@@ -60,9 +63,13 @@ const DEFAULT_EQ: EQSettings = {
   preset: "Audiophile Neutral",
   bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
   preamp: 0,
-  bassBoost: 15,
-  trebleBoost: 10,
+  bassBoost: 0,
+  trebleBoost: 0,
   stereoWidth: 100,
+  autoHeadroom: true,
+  peakProtection: true,
+  balance: 0,
+  mono: false,
 };
 
 const DEFAULT_SETTINGS: PlayerSettings = {
@@ -74,6 +81,7 @@ const DEFAULT_SETTINGS: PlayerSettings = {
   playbackRate: 1,
   resampleRate: "native",
   autoPlayNext: true,
+  autoTheme: true,
 };
 
 const revokeTrackAudioUrls = (trackList: Track[]) => {
@@ -159,6 +167,14 @@ export default function App() {
     useState<PlayerSettings>(DEFAULT_SETTINGS);
   const [storageUsedMB, setStorageUsedMB] = useState(0);
   const [playbackError, setPlaybackError] = useState("");
+  const [playbackStatus, setPlaybackStatus] = useState<PlaybackStatus>("idle");
+  const [libraryLoading, setLibraryLoading] = useState(true);
+  const preferencesLoaded = useRef(false);
+  const durationSaved = useRef(new Map<string, number>());
+  const artworkTheme = useArtworkTheme(
+    currentTrack,
+    playerSettings.autoTheme !== false,
+  );
   const currentTrackRef = useRef<Track | null>(null);
   currentTrackRef.current = currentTrack;
   const restored = useRef(false);
@@ -271,65 +287,90 @@ export default function App() {
 
   // Load or Seed Library
   const loadLibrary = useCallback(async () => {
-    await seedLibrary();
-    const existingTracks = await getAllTracks();
-    if (!restored.current) {
-      const last = await getKV<{ id: string; position: number } | null>(
-        "lastPlayback",
-        null,
-      );
-      if (last) {
-        const track = existingTracks.find((t) => t.id === last.id);
-        if (track) {
-          setCurrentTrack(track);
-          setCurrentTime(last.position);
-          resumePosition.current = last.position;
-        }
-      }
-      const nativeState = await audioEngine.syncNativeState();
-      if (nativeState?.trackId) {
-        const playingTrack = existingTracks.find(
-          (t) => t.id === nativeState.trackId,
+    setLibraryLoading(true);
+    try {
+      await seedLibrary();
+      const existingTracks = await getAllTracks();
+      if (!restored.current) {
+        const last = await getKV<{ id: string; position: number } | null>(
+          "lastPlayback",
+          null,
         );
-        if (playingTrack) {
-          setCurrentTrack(playingTrack);
-          setCurrentTime(nativeState.currentTime);
-          setDuration(nativeState.duration);
-          setIsPlaying(nativeState.isPlaying);
-          prepared.current = true;
-          resumePosition.current = 0;
+        if (last) {
+          const track = existingTracks.find((t) => t.id === last.id);
+          if (track) {
+            setCurrentTrack(track);
+            setCurrentTime(last.position);
+            resumePosition.current = last.position;
+          }
         }
+        const nativeState = await audioEngine.syncNativeState();
+        if (nativeState?.trackId) {
+          const playingTrack = existingTracks.find(
+            (t) => t.id === nativeState.trackId,
+          );
+          if (playingTrack) {
+            setCurrentTrack(playingTrack);
+            setCurrentTime(nativeState.currentTime);
+            setDuration(nativeState.duration);
+            setIsPlaying(nativeState.isPlaying);
+            prepared.current = true;
+            resumePosition.current = 0;
+          }
+        }
+        restored.current = true;
       }
-      restored.current = true;
+
+      setTracks((previousTracks) => {
+        revokeTrackAudioUrls(previousTracks);
+        return existingTracks;
+      });
+
+      const refreshedCurrent = existingTracks.find(
+        (track) => track.id === currentTrackRef.current?.id,
+      );
+      if (refreshedCurrent) {
+        currentTrackRef.current = refreshedCurrent;
+        setCurrentTrack(refreshedCurrent);
+      }
+      const loadedPlaylists = await getAllPlaylists();
+      setPlaylists(loadedPlaylists);
+
+      const loadedFavs = await getKV<string[]>("favorites", []);
+      setFavorites(loadedFavs);
+
+      // Refreshing tags/playlists must not reapply persisted controls over a playing decoder.
+      if (!preferencesLoaded.current) {
+        const eq = eqSchema.safeParse(
+          await getKV<EQSettings>("eqSettings", DEFAULT_EQ),
+        );
+        setEqSettings(
+          eq.success
+            ? { ...eq.data, preset: eq.data.preset || "Custom" }
+            : DEFAULT_EQ,
+        );
+
+        const settings = settingsSchema.safeParse(
+          await getKV<PlayerSettings>("playerSettings", DEFAULT_SETTINGS),
+        );
+        const loadedSettings = settings.success
+          ? settings.data
+          : DEFAULT_SETTINGS;
+        setPlayerSettings(loadedSettings);
+        setVolume(loadedSettings.volume);
+        setGaplessEnabled(loadedSettings.gapless);
+        audioEngine.setPlaybackRate(loadedSettings.playbackRate);
+        setTheme(loadedSettings.theme);
+        setVisualizerMode(loadedSettings.visualizerMode);
+        audioEngine.setVolume(loadedSettings.volume);
+        preferencesLoaded.current = true;
+      }
+
+      const stats = await getStorageStats();
+      setStorageUsedMB(stats.usedMB);
+    } finally {
+      setLibraryLoading(false);
     }
-
-    setTracks((previousTracks) => {
-      revokeTrackAudioUrls(previousTracks);
-      return existingTracks;
-    });
-
-    const loadedPlaylists = await getAllPlaylists();
-    setPlaylists(loadedPlaylists);
-
-    const loadedFavs = await getKV<string[]>("favorites", []);
-    setFavorites(loadedFavs);
-
-    const loadedEQ = await getKV<EQSettings>("eqSettings", DEFAULT_EQ);
-    setEqSettings(loadedEQ);
-
-    const loadedSettings = await getKV<PlayerSettings>(
-      "playerSettings",
-      DEFAULT_SETTINGS,
-    );
-    setPlayerSettings(loadedSettings);
-    setVolume(loadedSettings.volume);
-    setGaplessEnabled(loadedSettings.gapless);
-    audioEngine.setPlaybackRate(loadedSettings.playbackRate);
-    setTheme(loadedSettings.theme);
-    setVisualizerMode(loadedSettings.visualizerMode);
-
-    const stats = await getStorageStats();
-    setStorageUsedMB(stats.usedMB);
   }, []);
 
   useEffect(() => {
@@ -340,12 +381,36 @@ export default function App() {
 
   useEffect(() => {
     audioEngine.setCallbacks({
+      onStatusChange: setPlaybackStatus,
       onStateChange: setIsPlaying,
       onError: setPlaybackError,
       onEnded: () => nextRef.current(true),
       onTimeUpdate: (position, duration) => {
         setCurrentTime(position);
         setDuration(duration);
+        const selected = currentTrackRef.current;
+        const rounded = Math.round(duration);
+        if (
+          !audioEngine.isNative() &&
+          selected &&
+          rounded > 0 &&
+          Math.abs(rounded - selected.duration) > 1 &&
+          durationSaved.current.get(selected.id) !== rounded
+        ) {
+          durationSaved.current.set(selected.id, rounded);
+          // Merge into the latest metadata rather than a stale track captured by playTrack().
+          const updated = { ...selected, duration: rounded };
+          currentTrackRef.current = updated;
+          setCurrentTrack(updated);
+          setTracks((previous) =>
+            previous.map((track) =>
+              track.id === updated.id ? updated : track,
+            ),
+          );
+          void saveTrack(updated).catch((error) =>
+            setPlaybackError("Could not save track duration: " + error.message),
+          );
+        }
         if (currentTrackRef.current && Date.now() - persistAt.current > 3000) {
           persistAt.current = Date.now();
           void setKV("lastPlayback", {
@@ -366,48 +431,24 @@ export default function App() {
   const handlePlayTrack = async (track: Track) => {
     setPlaybackError("");
     prepared.current = true;
+    currentTrackRef.current = track;
     setCurrentTrack(track);
+    setCurrentTime(resumePosition.current);
+    setDuration(track.duration);
     audioEngine.setStartPosition(resumePosition.current);
     resumePosition.current = 0;
-    await audioEngine.playTrack(track, track.audioUrl, {
-      onTimeUpdate: (cur, dur) => {
-        setCurrentTime(cur);
-        setDuration(dur);
-        if (Date.now() - persistAt.current > 3000) {
-          persistAt.current = Date.now();
-          void setKV("lastPlayback", {
-            id: currentTrackRef.current?.id || track.id,
-            position: cur,
-          });
-        }
-
-        // Auto-update track duration in state & IndexedDB if real duration is loaded and differs
-        if (
-          !Capacitor.isNativePlatform() &&
-          dur > 0 &&
-          Math.abs(Math.round(dur) - track.duration) > 1
-        ) {
-          const updatedDuration = Math.round(dur);
-          const updatedTrack = { ...track, duration: updatedDuration };
-          setTracks((prev) =>
-            prev.map((t) => (t.id === track.id ? updatedTrack : t)),
-          );
-          saveTrack(updatedTrack);
-        }
-      },
-      onStateChange: (playing) => {
-        setIsPlaying(playing);
-      },
-      onError: (message) => setPlaybackError(message),
-      onEnded: () => nextRef.current(true),
-    });
-
-    audioEngine.applyEQ(eqSettings);
+    // Apply preferences before loading; an older async completion must never restore old settings.
     audioEngine.setVolume(isMuted ? 0 : volume);
     audioEngine.setPlaybackRate(playerSettings.playbackRate);
+    await audioEngine.playTrack(track, track.audioUrl);
   };
 
   const handlePlayPause = () => {
+    if (["loading", "buffering"].includes(audioEngine.getStatus())) {
+      audioEngine.pause();
+      return;
+    }
+    setPlaybackError("");
     if (!currentTrack && tracks.length > 0) {
       handlePlayTrack(tracks[0]);
     } else if (currentTrack && !prepared.current) {
@@ -466,7 +507,10 @@ export default function App() {
     audioEngine.onNativeTrackChanged = (id) => {
       const track = tracks.find((t) => t.id === id);
       if (track) {
+        currentTrackRef.current = track;
         setCurrentTrack(track);
+        setCurrentTime(0);
+        setDuration(track.duration);
         prepared.current = true;
         void setKV("lastPlayback", { id, position: 0 });
       }
@@ -489,7 +533,8 @@ export default function App() {
   // Register Media Session API Listeners for Lock Screen & Background playback
   useEffect(() => {
     audioEngine.registerMediaSessionHandlers({
-      onPlay: () => setIsPlaying(true),
+      // playing/native state events, not transport-button optimism, own the state.
+      onPlay: () => {},
       onPause: () => setIsPlaying(false),
       onNext: () => handleNextTrack(),
       onPrevious: handlePrevTrack,
@@ -519,9 +564,10 @@ export default function App() {
   const handleSaveTrackTags = async (updated: Track) => {
     await saveTrack(updated);
     if (currentTrack?.id === updated.id) {
+      currentTrackRef.current = updated;
       setCurrentTrack(updated);
     }
-    loadLibrary();
+    await loadLibrary();
   };
 
   // Playlist creation
@@ -535,7 +581,7 @@ export default function App() {
       updatedAt: Date.now(),
     };
     await savePlaylist(newPl);
-    loadLibrary();
+    await loadLibrary();
   };
 
   // Delete Playlist
@@ -597,13 +643,34 @@ export default function App() {
   };
 
   return (
-    <div className={`aether-app theme-${theme}`}>
+    <div
+      className={`aether-app theme-${theme} ${playerSettings.autoTheme !== false ? "artwork-theme" : ""}`}
+      style={artworkTheme}
+    >
+      {(libraryLoading ||
+        playbackStatus === "loading" ||
+        playbackStatus === "buffering") && (
+        <div className="playback-status" role="status" aria-live="polite">
+          <LoaderCircle size={16} className="loading-spinner" />
+          <span>
+            {libraryLoading
+              ? "Preparing your local collection…"
+              : playbackStatus === "buffering"
+                ? "Buffering local audio…"
+                : `Opening ${currentTrack?.title || "audio"}…`}
+          </span>
+          {!libraryLoading && (
+            <button onClick={() => audioEngine.pause()}>Cancel</button>
+          )}
+        </div>
+      )}
       {playbackError && (
         <div
           role="alert"
           className="absolute top-16 left-4 right-4 z-[120] bg-red-950 border border-red-500 p-4 rounded-xl text-sm flex gap-4"
         >
           <span className="flex-1">{playbackError}</span>
+          {currentTrack && <button onClick={handlePlayPause}>Retry</button>}
           <button onClick={() => setPlaybackError("")}>Dismiss</button>
         </div>
       )}
@@ -632,6 +699,25 @@ export default function App() {
                 <X size={16} />
               </button>
             </div>
+            <label className="flex gap-2 items-center">
+              <input
+                type="checkbox"
+                checked={playerSettings.autoTheme !== false}
+                onChange={(e) => {
+                  const updated = {
+                    ...playerSettings,
+                    autoTheme: e.target.checked,
+                  };
+                  setPlayerSettings(updated);
+                  void setKV("playerSettings", updated);
+                }}
+              />{" "}
+              Follow album artwork colors
+            </label>
+            <p className="text-xs text-zinc-400">
+              Music-matched background, highlights and Analog VU. Choosing a
+              manual theme turns this off.
+            </p>
             <label className="block">
               Speed{" "}
               <select
@@ -712,7 +798,7 @@ export default function App() {
           onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
           onSelectTheme={(t) => {
             setTheme(t);
-            const updated = { ...playerSettings, theme: t };
+            const updated = { ...playerSettings, theme: t, autoTheme: false };
             setPlayerSettings(updated);
             setKV("playerSettings", updated);
           }}
@@ -991,6 +1077,10 @@ export default function App() {
       {isFullscreenOpen && (
         <FullscreenPlayer
           currentTrack={currentTrack}
+          onEditLyrics={() => {
+            setIsFullscreenOpen(false);
+            setEditingTrack(currentTrack);
+          }}
           isPlaying={isPlaying}
           currentTime={currentTime}
           duration={duration}
@@ -1080,7 +1170,7 @@ export default function App() {
         theme={theme}
         onSelectTheme={(theme) => {
           setTheme(theme);
-          const updated = { ...playerSettings, theme };
+          const updated = { ...playerSettings, theme, autoTheme: false };
           setPlayerSettings(updated);
           void setKV("playerSettings", updated);
         }}

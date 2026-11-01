@@ -4077,3 +4077,377 @@ select option {
 .feature-landscape {
   mask-image: linear-gradient(90deg, transparent, #000 18%);
 }
+
+/* Artwork-driven signal room: shared tokens also paint the Analog VU needles. */
+.aether-app.artwork-theme {
+  background:
+    radial-gradient(ellipse at 80% 0%, var(--music-tint), transparent 64%),
+    #111214;
+}
+.aether-app .immersive-ambient {
+  background:
+    radial-gradient(
+      ellipse at 15% 30%,
+      rgba(var(--accent-rgb), 0.18),
+      transparent 65%
+    ),
+    radial-gradient(
+      ellipse at 85% 85%,
+      rgba(var(--accent-rgb), 0.09),
+      transparent 60%
+    );
+}
+.playback-status {
+  position: fixed;
+  top: calc(10px + var(--sat, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 125;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100vw - 24px);
+  border: 1px solid rgba(var(--accent-rgb), 0.25);
+  border-radius: 12px;
+  padding: 11px 15px;
+  background: #1a1b1ff5;
+  box-shadow: 0 8px 28px #0006;
+  color: var(--accent);
+  font-size: 12px;
+}
+.playback-status svg {
+  flex-shrink: 0;
+}
+.playback-status span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.playback-status button {
+  color: #ededee;
+  text-decoration: underline;
+  min-height: 30px;
+}
+.import-progress {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  margin: 16px 0;
+}
+.import-progress progress {
+  width: 100%;
+  height: 6px;
+  accent-color: var(--accent);
+}
+.import-target > span {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.lyrics-import-button {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px dashed rgba(var(--accent-rgb), 0.4);
+  border-radius: 10px;
+  color: var(--accent);
+  font-size: 12px;
+}
+.lyrics-import-button input {
+  width: 100%;
+  max-width: 100%;
+  font-size: 11px;
+  color: var(--muted);
+}
+.lyrics-panel {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.lyrics-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 0;
+  color: var(--muted);
+}
+.lyrics-toolbar small {
+  font-size: 9px;
+  letter-spacing: 0.8px;
+}
+.lyrics-toolbar button {
+  min-height: 36px;
+  color: var(--accent);
+  font-size: 12px;
+}
+.immersive-lyrics {
+  position: relative;
+  scroll-behavior: smooth;
+  overscroll-behavior: contain;
+}
+.immersive-lyrics > button {
+  display: block;
+  text-align: left;
+  width: 100%;
+  color: #929299;
+  font-size: clamp(16px, 2.3vw, 24px);
+  line-height: 1.6;
+  padding: 8px 0;
+  transition: color 0.25s;
+}
+.immersive-lyrics > button.active-lyric {
+  color: var(--accent);
+  font-weight: 600;
+}
+.studio-tools {
+  border: 1px solid rgba(var(--accent-rgb), 0.14);
+  background: rgba(var(--accent-rgb), 0.025);
+  border-radius: 14px;
+  padding: 18px;
+  margin: 18px 0;
+  min-width: 0;
+}
+.studio-tools-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  flex-wrap: wrap;
+}
+.studio-tools h3 {
+  font-size: 17px;
+  margin-top: 7px;
+  letter-spacing: -0.4px;
+}
+.studio-ab {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.studio-tools button,
+.studio-file-button {
+  border: 1px solid #ffffff17;
+  border-radius: 7px;
+  background: #ffffff04;
+  padding: 8px 11px;
+  font-size: 11px;
+  min-height: 34px;
+}
+.studio-ab button[aria-pressed="true"] {
+  background: rgba(var(--accent-rgb), 0.13);
+  border-color: rgba(var(--accent-rgb), 0.3);
+  color: var(--accent);
+}
+.studio-tools button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.studio-tools input[type="checkbox"],
+.studio-tools input[type="range"] {
+  accent-color: var(--accent);
+}
+.studio-meters {
+  padding: 18px 0 15px;
+  min-width: 0;
+}
+.studio-meters > div {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin: 6px 0;
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+}
+.studio-meters meter {
+  width: 100%;
+  flex: 1;
+  height: 13px;
+  min-width: 20px;
+  accent-color: var(--accent);
+}
+.studio-meters output {
+  min-width: 114px;
+  text-align: right;
+  color: var(--accent);
+}
+.studio-meters small {
+  color: var(--muted);
+  font-size: 9px;
+}
+.studio-meters > p {
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  font-size: 9px;
+  color: #aaa7a5;
+  margin: 8px 0;
+}
+.studio-meters .studio-hot {
+  color: #f39b85;
+}
+.studio-protection-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  padding: 15px 0;
+  border-block: 1px solid #ffffff0b;
+}
+.studio-protection-grid > label {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 12px;
+}
+.studio-protection-grid input[type="checkbox"] {
+  margin-top: 2px;
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+}
+.studio-protection-grid small {
+  display: block;
+  font-size: 10px;
+  color: var(--muted);
+  line-height: 1.6;
+  margin-top: 4px;
+}
+.studio-protection-grid .studio-balance {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+.studio-balance > span {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.studio-balance output {
+  color: var(--accent);
+}
+.studio-balance input {
+  width: 100%;
+  min-width: 0;
+}
+.studio-balance button {
+  padding: 3px 8px;
+  min-height: 28px;
+}
+.studio-preset-tools {
+  display: flex;
+  align-items: flex-end;
+  gap: 7px;
+  flex-wrap: wrap;
+  margin-top: 17px;
+}
+.studio-preset-tools > label:first-child {
+  flex: 1 1 140px;
+  display: grid;
+  gap: 7px;
+  font-size: 9px;
+  letter-spacing: 0.7px;
+  color: var(--muted);
+}
+.studio-preset-tools input[type="text"],
+.studio-preset-tools input:not([type]) {
+  background: #111214;
+  border: 1px solid #ffffff15;
+  border-radius: 7px;
+  color: #eee;
+  min-width: 0;
+  width: 100%;
+  font-size: 12px;
+  padding: 9px 10px;
+}
+.studio-file-button {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  position: relative;
+  overflow: hidden;
+}
+.studio-file-button input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+.studio-file-button:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.studio-user-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 14px;
+}
+.studio-user-presets > div {
+  display: flex;
+}
+.studio-user-presets button:first-child {
+  color: var(--accent);
+  border-radius: 7px 0 0 7px;
+  overflow-wrap: anywhere;
+}
+.studio-user-presets button:last-child {
+  border-radius: 0 7px 7px 0;
+}
+.studio-note {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.7;
+  margin-top: 12px;
+}
+.studio-message {
+  font-size: 11px;
+  color: var(--accent);
+  line-height: 1.6;
+  margin-top: 8px;
+}
+@media (max-width: 600px) {
+  .studio-tools {
+    padding: 13px;
+  }
+  .studio-protection-grid {
+    grid-template-columns: 1fr;
+    gap: 15px;
+  }
+  .studio-tools button,
+  .studio-file-button {
+    min-height: 40px;
+  }
+  .studio-meters output {
+    min-width: 98px;
+    font-size: 10px;
+  }
+  .studio-meters > div {
+    gap: 6px;
+  }
+  .studio-meters > p {
+    flex-wrap: wrap;
+  }
+  .studio-tools h3 {
+    font-size: 16px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .immersive-lyrics {
+    scroll-behavior: auto;
+  }
+}
+.studio-fft-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font: 9px monospace;
+  color: var(--accent);
+  margin-bottom: 8px;
+}
+.studio-fft > small {
+  color: var(--muted);
+  font-size: 9px;
+}
