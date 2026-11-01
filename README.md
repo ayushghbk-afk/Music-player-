@@ -8,6 +8,12 @@ The redesigned interface uses charcoal surfaces, a theme-aware copper accent, bu
 
 Artwork and application assets are precached in production for offline use. Modal focus management, keyboard-operated EQ ranges, visible focus rings, and reduced-motion support are included. Browser smoke checks covered playback, library controls, secondary screens, and viewport widths 390/768/1280/1536; Android device rendering remains unverified.
 
+### Dedicated phone layout
+
+The phone UI has five primary tabs and a focus-managed More sheet for hi-res tracks, the assistant, backup/sync, playback preferences and all five appearance themes. Header search opens and focuses library search. The home screen has phone-specific typography and collection shortcuts, and the mini-player only appears once a track is selected. Player, library, import and EQ controls use larger mobile touch targets. Safe-area padding, narrow screens, landscape layouts and Android back dismissal are handled separately from desktop styles in `src/mobile.css`.
+
+Verified in Chromium at widths 320, 360, 390, 430, 768 and 1280, including playback/search, More navigation, themes and EQ. Physical Android and iOS rendering still needs device testing.
+
 ## Run the web app
 
 Requires **Node 22.13+** (SQLite uses `node:sqlite`).
@@ -22,7 +28,7 @@ Open port **3000**, or run `PORT=24678 npm run dev` for the current Arena previe
 
 ```sh
 npm run lint       # tsc --noEmit
-npm test           # 10 tests: schema validation, presentation helpers, real WAV metadata
+npm test           # 12 tests: schema validation, presentation helpers, real WAV metadata
 npm run build      # Vite client + dist/server.cjs
 npm start          # production Express server
 ```

@@ -44,7 +44,9 @@ export function PlayerDock(p: PlayerDockProps) {
     ? Math.min(100, (p.currentTime / p.duration) * 100)
     : 0;
   return (
-    <footer className="player-dock">
+    <footer
+      className={`player-dock ${p.currentTrack ? "has-track" : "is-idle"}`}
+    >
       <button
         className="dock-track"
         onClick={p.onOpenFullscreen}
