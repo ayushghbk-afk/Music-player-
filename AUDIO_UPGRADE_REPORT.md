@@ -50,7 +50,7 @@ All audio stays local. Android remains **ExoPlayer-only**: there is no WebView-a
 
 **✅ POSITIVE (1)**
 
-1. Auto headroom estimates combined filter/preamp/stereo gain; a soft-knee peak guard bounds overloaded samples. Both engines support mono monitoring and balance, plus measured RMS/peak hold. A/B snapshots, 20 device-local presets, validated EQ JSON import/export and flat reset provide repeatable workflows.
+1. Auto headroom estimates combined filter/preamp/stereo gain; a soft-knee guard plus final post-oversampling sample ceiling bounds overloaded samples. Both engines support mono monitoring and balance, plus measured RMS/peak hold. A/B snapshots, 20 device-local presets, validated EQ JSON import/export and flat reset provide repeatable workflows.
 
 **❌ NEGATIVE (5)**
 
@@ -93,9 +93,9 @@ For an APK, open the **Android builds** workflow on this branch and download **a
 
 ## Verification status
 
-- TypeScript lint and **27/27** unit/regression tests pass, including out-of-order playback, cancellation/resume, stale events, lyrics/encoding, headroom/defaults and readable artwork accents.
+- TypeScript lint and **30/30** unit/regression tests pass, including out-of-order playback, cancellation/resume, autoplay retries, serialized native imports, stale events, lyrics/encoding, headroom/defaults and readable artwork accents.
 - Production, Pages and Android-client/Capacitor-sync builds are checked locally. Build warnings about the main bundle exceeding 500 kB and four moderate transitive tooling advisories remain; do not use a forced audit upgrade without testing.
-- Real Chromium interaction checks passed: audio + matching-sidecar import, tag-editor lyrics save, synced highlight/seek, actual independent L/R RMS, VU response to volume changes, deliberately delayed old-vs-new playback, cancel/resume, A/B recall, real mono/balance changes, heavily boosted peak guard, invalid-preset rejection, custom-preset storage, artwork/manual theme persistence and no horizontal overflow at 320/360/390/430/768/1280 px. No page exceptions were observed. Headless signal measurements are not a substitute for listening tests.
-- **Android CI passed** native processor tests (five), Gradle APK compilation, lint and APK signature verification for commit `a011042`: [run 41333830571](https://github.com/ayushghbk-afk/Music-player-/actions/runs/41333830571). Later web-only verification refinements require the latest branch run to pass too.
+- Real Chromium interaction checks passed: audio + matching-sidecar import, tag-editor lyrics save, synced highlight/seek, actual independent L/R RMS, VU response to volume changes, deliberately delayed old-vs-new playback, cancel/resume, A/B recall, real mono/balance changes, headroom-aware response dragging, heavily boosted peak guard at full output volume, invalid-preset rejection, custom-preset storage, artwork/manual theme persistence and no horizontal overflow at 320/360/390/430/768/1280 px. No page exceptions were observed. Headless signal measurements are not a substitute for listening tests.
+- **Android CI passed** native processor tests (five), Gradle APK compilation, lint and APK signature verification for commit `a011042`: [run 41333830571](https://github.com/ayushghbk-afk/Music-player-/actions/runs/41333830571). Later refinements also add mono-source upmix/balance coverage (six native tests total); check the latest branch workflow for that build.
 - Native regression tests cover channel separation, headroom/PCM range, mono/balance, rapid-update continuity and flush-reset metering.
 - No physical Android/iOS, Bluetooth, USB DAC, hardware-volume, or locked-screen listening tests were performed. The sandbox has no local Java/Android SDK; Gradle validation runs on GitHub CI.

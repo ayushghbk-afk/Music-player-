@@ -1,4 +1,5 @@
 import { registerPlugin, PluginListenerHandle } from "@capacitor/core";
+import { SerialTaskQueue } from "./serialTaskQueue";
 import type { EQSettings } from "../types";
 
 export interface AetherPlayerState {
@@ -174,20 +175,24 @@ const importViaChunks = async (
  * Capacitor plugin, still persistent — it runs at import time in the
  * foreground, never on the playback path.
  */
-export const importTrackToNativeStore = async (
+// begin/append/commit uses one native activeWrite. Never interleave two fallbacks,
+// including an import that overlaps rapid playback selections or a library import.
+const imports = new SerialTaskQueue();
+export const importTrackToNativeStore = (
   options: TrackImportOptions,
   blob: Blob,
-): Promise<"streamed" | "chunked"> => {
-  try {
-    const info = await serverInfo();
-    await importViaServer(options, blob, info);
-    return "streamed";
-  } catch {
-    cachedServerInfo = null; // re-probe next time
-    await importViaChunks(options, blob);
-    return "chunked";
-  }
-};
+): Promise<"streamed" | "chunked"> =>
+  imports.run(async () => {
+    try {
+      const info = await serverInfo();
+      await importViaServer(options, blob, info);
+      return "streamed";
+    } catch {
+      cachedServerInfo = null;
+      await importViaChunks(options, blob);
+      return "chunked";
+    }
+  });
 
 export const nativeTrackExists = async (trackId: string): Promise<boolean> => {
   try {

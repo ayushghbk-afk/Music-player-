@@ -670,9 +670,7 @@ export default function App() {
           className="absolute top-16 left-4 right-4 z-[120] bg-red-950 border border-red-500 p-4 rounded-xl text-sm flex gap-4"
         >
           <span className="flex-1">{playbackError}</span>
-          {currentTrack && (
-            <button onClick={() => handlePlayTrack(currentTrack)}>Retry</button>
-          )}
+          {currentTrack && <button onClick={handlePlayPause}>Retry</button>}
           <button onClick={() => setPlaybackError("")}>Dismiss</button>
         </div>
       )}

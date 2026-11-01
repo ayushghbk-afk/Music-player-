@@ -124,7 +124,14 @@ test("remote sources produce a useful error and stop rather than stream", async 
   const e = engine();
   let error = "";
   e.setCallbacks({ onError: (message: string) => (error = message) });
-  await e.playTrack(a, "https://example.test/song.mp3");
+  for (const source of [
+    "https://example.test/song.mp3",
+    "//example.test/song.mp3",
+    "/\\\\example.test/song.mp3",
+  ]) {
+    await e.playTrack(a, source);
+    assert.equal(e.loadedTrackId, null);
+  }
   assert.equal(e.getStatus(), "error");
   assert.match(error, /Only local/);
   assert.equal(e.loadedTrackId, null);
@@ -134,4 +141,24 @@ test("playback rate is applied before starting a replacement media source", asyn
   e.setPlaybackRate(1.5);
   await e.playTrack(a, sourceA);
   assert.equal(e.audioElement.playbackRate, 1.5);
+});
+
+test("autoplay rejection can retry directly on a gesture without reloading the source", async () => {
+  const e = engine(),
+    play = e.audioElement.play.bind(e.audioElement);
+  let denied = true;
+  e.audioElement.play = () =>
+    denied ? Promise.reject(new Error("NotAllowedError")) : play();
+  await e.playTrack(a, sourceA);
+  assert.equal(e.getStatus(), "error");
+  const generation = e.loadGeneration;
+  denied = false;
+  e.play();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(e.getStatus(), "playing");
+  assert.equal(
+    e.loadGeneration,
+    generation,
+    "A gesture retry must not reload and defer play()",
+  );
 });

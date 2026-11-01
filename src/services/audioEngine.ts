@@ -78,6 +78,8 @@ export class AudioEngine {
   private meterSamples = new Float32Array(1024);
   private frequencySamples = new Uint8Array(1024);
   private protection: WaveShaperNode | null = null;
+  private outputCeiling: WaveShaperNode | null = null;
+  private ceilingCurve: Float32Array | null = null;
   private balanceGains: GainNode[] = [];
   private switchGain: GainNode | null = null;
   private nativeMeter: MeterLevels = {
@@ -664,7 +666,10 @@ export class AudioEngine {
       this.protectionEnabled = undefined;
       this.protection.oversample = "2x";
       balanceMerger.connect(this.protection);
-      this.protection.connect(this.masterGainNode);
+      this.outputCeiling = this.audioCtx.createWaveShaper();
+      this.outputCeiling.oversample = "none";
+      this.protection.connect(this.outputCeiling);
+      this.outputCeiling.connect(this.masterGainNode);
       this.masterGainNode.connect(this.analyserNode);
       this.analyserNode.connect(this.audioCtx.destination);
       const meterSplitter = this.audioCtx.createChannelSplitter(2);
@@ -853,7 +858,7 @@ export class AudioEngine {
       // Local files only. No remote streaming URL can enter this graph.
       if (
         !/^(blob:|data:audio\/)/.test(urlToPlay) &&
-        !urlToPlay.startsWith("/")
+        !/^\/(?![\\/])/.test(urlToPlay)
       )
         throw new Error("Only local audio is supported.");
       await focus;
@@ -1124,6 +1129,18 @@ export class AudioEngine {
           this.protectionCurve = curve;
         }
         this.protection.curve = protect ? this.protectionCurve : null;
+        // Oversampling reconstruction can overshoot a soft curve. Keep a final
+        // sample ceiling AFTER that filter; this still makes no true-peak claim.
+        if (!this.ceilingCurve) {
+          this.ceilingCurve = new Float32Array(4097);
+          for (let i = 0; i < this.ceilingCurve.length; i++)
+            this.ceilingCurve[i] = Math.max(
+              -0.98,
+              Math.min(0.98, (i * 2) / (this.ceilingCurve.length - 1) - 1),
+            );
+        }
+        if (this.outputCeiling)
+          this.outputCeiling.curve = protect ? this.ceilingCurve : null;
         this.protectionEnabled = protect;
       }
     }
