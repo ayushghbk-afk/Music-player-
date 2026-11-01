@@ -72,6 +72,9 @@ export class AudioEngine {
   private status: PlaybackStatus = "idle";
   private onStatusChange?: (status: PlaybackStatus) => void;
   private stereoAnalysers: AnalyserNode[] = [];
+  private guardAnalysers: AnalyserNode[] = [];
+  private protectionEnabled: boolean | undefined;
+  private protectionCurve: Float32Array | null = null;
   private meterSamples = new Float32Array(1024);
   private frequencySamples = new Uint8Array(1024);
   private protection: WaveShaperNode | null = null;
@@ -102,6 +105,7 @@ export class AudioEngine {
   private fail(message: string) {
     this.shouldResumeAfterInterruption = false;
     this.setStatus("error");
+    this.audioElement?.pause();
     this.onStateChangeCallback?.(false);
     this.onErrorCallback?.(message);
   }
@@ -205,7 +209,7 @@ export class AudioEngine {
         this.nativeMeterAt = performance.now();
       }
       if (event.type === "buffering") this.setStatus("buffering");
-      if (event.type === "ready")
+      if (event.type === "ready" && this.status !== "error")
         this.setStatus(event.isPlaying ? "playing" : "paused");
       if (typeof event.currentTime === "number")
         this.nativePosition = event.currentTime;
@@ -648,7 +652,16 @@ export class AudioEngine {
         gain.connect(balanceMerger, 0, channel);
         return gain;
       });
+      const guardSplitter = this.audioCtx.createChannelSplitter(2);
+      balanceMerger.connect(guardSplitter);
+      this.guardAnalysers = [0, 1].map((channel) => {
+        const analyser = this.audioCtx!.createAnalyser();
+        analyser.fftSize = 1024;
+        guardSplitter.connect(analyser, channel);
+        return analyser;
+      });
       this.protection = this.audioCtx.createWaveShaper();
+      this.protectionEnabled = undefined;
       this.protection.oversample = "2x";
       balanceMerger.connect(this.protection);
       this.protection.connect(this.masterGainNode);
@@ -709,7 +722,7 @@ export class AudioEngine {
     });
 
     audio.addEventListener("playing", () => {
-      if (this.loadedTrackId !== this.currentTrack?.id) return;
+      if (audio.paused || this.loadedTrackId !== this.currentTrack?.id) return;
       this.setStatus("playing");
       if (this.switchGain && this.audioCtx) {
         const now = this.audioCtx.currentTime;
@@ -883,13 +896,21 @@ export class AudioEngine {
   }
 
   public play() {
+    const canResumeWeb =
+      !this.usesNativePlayback() &&
+      this.audioElement?.src &&
+      !this.audioElement.error &&
+      this.loadedTrackId === this.currentTrack?.id;
     if (
       this.currentTrack &&
-      (this.loadedTrackId !== this.currentTrack.id || this.status === "error")
+      (this.loadedTrackId !== this.currentTrack.id ||
+        (this.status === "error" && !canResumeWeb))
     ) {
       void this.playTrack(this.currentTrack);
       return;
     }
+    // Retry an autoplay-policy rejection on the direct gesture, without reloading the decoder.
+    if (canResumeWeb && this.status === "error") this.setStatus("buffering");
     if (this.usesNativePlayback()) {
       AetherPlayer.play().catch((err) =>
         this.onErrorCallback?.("Native play failed: " + err.message),
@@ -1023,11 +1044,20 @@ export class AudioEngine {
       }
       return Math.sqrt(sum / this.meterSamples.length);
     });
+    let hot = false;
+    for (const analyser of this.guardAnalysers) {
+      analyser.getFloatTimeDomainData(this.meterSamples);
+      for (const sample of this.meterSamples)
+        if (Math.abs(sample) >= 0.97) {
+          hot = true;
+          break;
+        }
+    }
     return {
       left: rms[0] || 0,
       right: rms[1] || 0,
       peak,
-      overloaded: peak >= 0.97,
+      overloaded: hot || peak >= 0.97,
       source: rms.length ? "web" : "unavailable",
     };
   }
@@ -1080,16 +1110,22 @@ export class AudioEngine {
       // Identity below -1.4 dBFS; a continuous soft knee bounds overloaded peaks.
       // This is a safety guard, not a loudness maximizer or true-peak limiter.
       const protect = eq.peakProtection !== false;
-      const curve = new Float32Array(4097);
-      for (let i = 0; i < curve.length; i++) {
-        const x = (i * 2) / (curve.length - 1) - 1,
-          a = Math.abs(x);
-        curve[i] =
-          protect && a > 0.85
-            ? Math.sign(x) * (0.85 + 0.13 * Math.tanh((a - 0.85) / 0.13))
-            : x;
+      if (this.protectionEnabled !== protect) {
+        if (protect && !this.protectionCurve) {
+          const curve = new Float32Array(4097);
+          for (let i = 0; i < curve.length; i++) {
+            const x = (i * 2) / (curve.length - 1) - 1,
+              a = Math.abs(x);
+            curve[i] =
+              a > 0.85
+                ? Math.sign(x) * (0.85 + 0.13 * Math.tanh((a - 0.85) / 0.13))
+                : x;
+          }
+          this.protectionCurve = curve;
+        }
+        this.protection.curve = protect ? this.protectionCurve : null;
+        this.protectionEnabled = protect;
       }
-      this.protection.curve = protect ? curve : null;
     }
   }
 

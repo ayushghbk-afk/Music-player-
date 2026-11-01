@@ -85,6 +85,9 @@ const EqualizerGraph: React.FC<{
   onBandChange: (idx: number, val: number) => void;
 }> = ({ eqSettings, onBandChange }) => {
   const svgRef = useRef<SVGSVGElement>(null);
+  const dragOrigin = useRef<{ y: number; gain: number; index: number } | null>(
+    null,
+  );
   const [activeBandHover, setActiveBandHover] = useState<number | null>(null);
   const [isDraggingBand, setIsDraggingBand] = useState<number | null>(null);
 
@@ -113,45 +116,33 @@ const EqualizerGraph: React.FC<{
     return { x, y, bandVal, netDb, freq, index: i };
   });
 
-  const getSmoothPath = (pts: typeof bandPoints) => {
-    if (pts.length === 0) return "";
-    let path = `M ${pts[0].x},${pts[0].y}`;
-    for (let i = 0; i < pts.length - 1; i++) {
-      const curr = pts[i];
-      const next = pts[i + 1];
-      const prev = pts[i - 1] || curr;
-      const after = pts[i + 2] || next;
-
-      const cp1x = curr.x + (next.x - prev.x) * 0.22;
-      const cp1y = curr.y + (next.y - prev.y) * 0.22;
-      const cp2x = next.x - (after.x - curr.x) * 0.22;
-      const cp2y = next.y - (after.y - curr.y) * 0.22;
-
-      path += ` C ${cp1x.toFixed(1)},${cp1y.toFixed(1)} ${cp2x.toFixed(1)},${cp2y.toFixed(1)} ${next.x.toFixed(1)},${next.y.toFixed(1)}`;
-    }
-    return path;
-  };
-
-  const curvePath = getSmoothPath(bandPoints);
+  // Actual sampled biquad response, not an interpolated sum of slider positions.
+  const curvePath = Array.from({ length: 160 }, (_, i) => {
+    const frequency =
+      EQ_FREQUENCIES[0] * (EQ_FREQUENCIES[9] / EQ_FREQUENCIES[0]) ** (i / 159);
+    const db = eqSettings.enabled
+      ? responseDb(coefficients, frequency, sampleRate) +
+        eqSettings.preamp -
+        reduction
+      : 0;
+    return `${i ? "L" : "M"} ${paddingX + (i / 159) * graphWidth},${centerY - ((Math.max(-18, Math.min(18, db)) / 18) * graphHeight) / 2}`;
+  }).join(" ");
   const fillPath = `${curvePath} L ${bandPoints[9].x},${height - paddingY} L ${bandPoints[0].x},${height - paddingY} Z`;
 
   const handlePointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
-    if (isDraggingBand === null || !svgRef.current || !eqSettings.enabled)
-      return;
+    const origin = dragOrigin.current;
+    if (!origin || !svgRef.current || !eqSettings.enabled) return;
     const rect = svgRef.current.getBoundingClientRect();
-    const clientY = e.clientY - rect.top;
-
-    const normalizedY =
-      (clientY - (rect.height * paddingY) / height) /
-      ((rect.height * graphHeight) / height);
-    const clampedNorm = Math.max(0, Math.min(1, normalizedY));
-    const dbVal = Math.round((0.5 - clampedNorm) * 24 * 2) / 2;
-    const clampedDb = Math.max(-12, Math.min(12, dbVal));
-
-    onBandChange(isDraggingBand, clampedDb);
+    const deltaDb =
+      ((((origin.y - e.clientY) / rect.height) * height) / graphHeight) * 36;
+    onBandChange(
+      origin.index,
+      Math.max(-12, Math.min(12, Math.round((origin.gain + deltaDb) * 2) / 2)),
+    );
   };
 
   const handlePointerUp = () => {
+    dragOrigin.current = null;
     setIsDraggingBand(null);
   };
 
@@ -161,7 +152,7 @@ const EqualizerGraph: React.FC<{
         <div className="flex items-center gap-2">
           <Activity className="w-3.5 h-3.5 text-sky-400 animate-pulse" />
           <span className="font-bold text-white uppercase tracking-wider text-[10px]">
-            DSP Response Curve
+            Sampled DSP Response
           </span>
           <span
             className={`text-[9px] px-1.5 py-0.2 rounded font-bold border ${
@@ -174,9 +165,9 @@ const EqualizerGraph: React.FC<{
           </span>
         </div>
         <div className="flex items-center gap-3 text-[9px]">
-          <span className="text-sky-400 font-semibold">+12 dB</span>
+          <span className="text-sky-400 font-semibold">+18 dB</span>
           <span className="text-zinc-500">0 dB</span>
-          <span className="text-rose-400 font-semibold">-12 dB</span>
+          <span className="text-rose-400 font-semibold">−18 dB</span>
         </div>
       </div>
 
@@ -186,7 +177,9 @@ const EqualizerGraph: React.FC<{
           viewBox={`0 0 ${width} ${height}`}
           className="w-full h-full cursor-crosshair overflow-visible"
           onPointerMove={handlePointerMove}
+          style={{ touchAction: "none" }}
           onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
           onPointerLeave={handlePointerUp}
         >
           <defs>
@@ -269,7 +262,16 @@ const EqualizerGraph: React.FC<{
                 className="cursor-pointer"
                 onPointerDown={(e) => {
                   e.stopPropagation();
-                  if (eqSettings.enabled) setIsDraggingBand(pt.index);
+                  if (eqSettings.enabled) {
+                    e.preventDefault();
+                    dragOrigin.current = {
+                      y: e.clientY,
+                      gain: pt.bandVal,
+                      index: pt.index,
+                    };
+                    svgRef.current?.setPointerCapture(e.pointerId);
+                    setIsDraggingBand(pt.index);
+                  }
                 }}
                 onMouseEnter={() => setActiveBandHover(pt.index)}
                 onMouseLeave={() => setActiveBandHover(null)}

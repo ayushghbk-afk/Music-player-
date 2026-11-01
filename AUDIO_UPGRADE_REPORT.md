@@ -93,4 +93,9 @@ For an APK, open the **Android builds** workflow on this branch and download **a
 
 ## Verification status
 
-Local TypeScript lint and 21 tests pass. Client/Android-sync and Pages builds pass. Native processor regression tests are added to Android CI; actual Gradle results and Chromium interaction results must be checked separately before claiming those passed. The sandbox does not have Java/Android SDK installed. Physical-device audio fidelity remains untested.
+- TypeScript lint and **27/27** unit/regression tests pass, including out-of-order playback, cancellation/resume, stale events, lyrics/encoding, headroom/defaults and readable artwork accents.
+- Production, Pages and Android-client/Capacitor-sync builds are checked locally. Build warnings about the main bundle exceeding 500 kB and four moderate transitive tooling advisories remain; do not use a forced audit upgrade without testing.
+- Real Chromium interaction checks passed: audio + matching-sidecar import, tag-editor lyrics save, synced highlight/seek, actual independent L/R RMS, VU response to volume changes, deliberately delayed old-vs-new playback, cancel/resume, A/B recall, real mono/balance changes, heavily boosted peak guard, invalid-preset rejection, custom-preset storage, artwork/manual theme persistence and no horizontal overflow at 320/360/390/430/768/1280 px. No page exceptions were observed. Headless signal measurements are not a substitute for listening tests.
+- **Android CI passed** native processor tests (five), Gradle APK compilation, lint and APK signature verification for commit `a011042`: [run 41333830571](https://github.com/ayushghbk-afk/Music-player-/actions/runs/41333830571). Later web-only verification refinements require the latest branch run to pass too.
+- Native regression tests cover channel separation, headroom/PCM range, mono/balance, rapid-update continuity and flush-reset metering.
+- No physical Android/iOS, Bluetooth, USB DAC, hardware-volume, or locked-screen listening tests were performed. The sandbox has no local Java/Android SDK; Gradle validation runs on GitHub CI.

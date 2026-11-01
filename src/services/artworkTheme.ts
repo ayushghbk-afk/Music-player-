@@ -35,15 +35,20 @@ export function artworkAccent(pixels: Uint8ClampedArray): string {
   // Lift artwork colors into a readable pastel accent against dark surfaces.
   const max = Math.max(...rgb),
     lift = Math.max(0, 195 - max);
+  let readable = rgb.map((n) => Math.min(235, n + lift + (255 - n) * 0.16));
+  const luminance = (values: number[]) =>
+    values
+      .map((n) => {
+        const s = n / 255;
+        return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+      })
+      .reduce((sum, n, i) => sum + n * [0.2126, 0.7152, 0.0722][i], 0);
+  // Saturated blue is bright in RGB but dark to the eye: enforce luminance too.
+  for (let i = 0; i < 32 && luminance(readable) < 0.42; i++)
+    readable = readable.map((n) => n + (255 - n) * 0.06);
   return (
     "#" +
-    rgb
-      .map((n) =>
-        Math.round(Math.min(235, n + lift + (255 - n) * 0.16))
-          .toString(16)
-          .padStart(2, "0"),
-      )
-      .join("")
+    readable.map((n) => Math.round(n).toString(16).padStart(2, "0")).join("")
   );
 }
 const cache = new Map<string, string>();

@@ -58,6 +58,18 @@ public class AetherDspProcessorTest {
         }
         assertTrue("Abrupt DSP discontinuity: "+maxStep,maxStep<0.08);
     }
+    @Test public void monoSourcesAreUpmixedForRealChannelBalance() throws Exception {
+        AetherDspProcessor p=new AetherDspProcessor();
+        AudioProcessor.AudioFormat output=p.configure(new AudioProcessor.AudioFormat(48000,1,C.ENCODING_PCM_16BIT)); p.flush();
+        assertEquals(2,output.channelCount);
+        p.update(true,new double[10],0,0,0,100,true,true,1,false);
+        for(int block=0;block<6;block++) {
+            ByteBuffer data=ByteBuffer.allocateDirect(2048).order(ByteOrder.nativeOrder());
+            for(int i=0;i<1024;i++) data.putShort((short)(0.4*Math.sin(2*Math.PI*220*(block*1024+i)/48000)*32767));
+            data.flip(); p.queueInput(data); assertEquals(4096,p.getOutput().remaining());
+        }
+        assertEquals(0,p.getMeter().left,1e-8); assertTrue(p.getMeter().right>0.2);
+    }
     @Test public void flushClearsStaleLevels() throws Exception {
         AetherDspProcessor p=processor(); p.queueInput(tone(2048,0.5,0.5,0)); p.getOutput();
         assertTrue(p.getMeter().peak>0); p.flush(); assertEquals(0,p.getMeter().peak,0);

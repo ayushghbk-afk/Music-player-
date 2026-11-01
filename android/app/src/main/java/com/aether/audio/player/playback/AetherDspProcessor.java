@@ -16,7 +16,7 @@ public final class AetherDspProcessor extends BaseAudioProcessor {
     private static final double[] FREQUENCIES = {31,62,125,250,500,1000,2000,4000,8000,16000};
     private volatile Settings requested = new Settings(false, new double[10], 0, 0, 0, 100, true, true, 0, false);
     private Settings applied;
-    private int channels, sampleRate, fadeRemaining, fadeLength;
+    private int inputChannels, channels, sampleRate, fadeRemaining, fadeLength;
     private Bank current, previous;
     private double[] inputFrame, frame, previousFrame;
     public static final class Meter {
@@ -48,10 +48,10 @@ public final class AetherDspProcessor extends BaseAudioProcessor {
     }
     @Override protected AudioFormat onConfigure(AudioFormat input) throws AudioProcessor.UnhandledAudioFormatException {
         if (input.encoding != C.ENCODING_PCM_16BIT) throw new AudioProcessor.UnhandledAudioFormatException(input);
-        channels=input.channelCount; sampleRate=input.sampleRate;
+        inputChannels=input.channelCount; channels=Math.max(2,inputChannels); sampleRate=input.sampleRate;
         inputFrame=new double[channels]; frame=new double[channels]; previousFrame=new double[channels];
         applied=null; current=null; previous=null;
-        return input;
+        return new AudioFormat(sampleRate,channels,input.encoding);
     }
     private final class Bank {
         final Settings settings;
@@ -129,11 +129,14 @@ public final class AetherDspProcessor extends BaseAudioProcessor {
             fadeLength=Math.max(1,sampleRate/50); fadeRemaining=fadeLength;
         }
         settings=applied;
-        ByteBuffer output=replaceOutputBuffer(input.remaining()).order(ByteOrder.nativeOrder());
+        ByteBuffer output=replaceOutputBuffer(input.remaining()/inputChannels*channels).order(ByteOrder.nativeOrder());
         input.order(ByteOrder.nativeOrder());
         double sumLeft=0,sumRight=0,peak=0; int count=0; boolean overloaded=false;
-        while(input.remaining()>=channels*2) {
-            for(int ch=0;ch<channels;ch++) inputFrame[ch]=input.getShort()/32768.0;
+        while(input.remaining()>=inputChannels*2) {
+            if(inputChannels==1) {
+                double mono=input.getShort()/32768.0;
+                inputFrame[0]=mono; inputFrame[1]=mono;
+            } else for(int ch=0;ch<channels;ch++) inputFrame[ch]=input.getShort()/32768.0;
             current.process(inputFrame,frame);
             if(fadeRemaining>0) {
                 if(previous!=null) previous.process(inputFrame,previousFrame);
