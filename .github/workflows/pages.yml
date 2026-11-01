@@ -17,7 +17,6 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-      - uses: actions/configure-pages@v5
       - run: npm ci
       - run: npm run lint
       - run: npm test
@@ -38,6 +37,7 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - uses: actions/configure-pages@v5
       - name: Publish website
         id: deployment
         uses: actions/deploy-pages@v4
