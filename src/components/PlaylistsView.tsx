@@ -348,7 +348,7 @@ export const PlaylistsView: React.FC<PlaylistsViewProps> = ({
 
                       {/* Thumbnail */}
                       <div className="w-9 h-9 rounded-lg bg-zinc-800 flex items-center justify-center text-zinc-400 flex-shrink-0 overflow-hidden border border-white/10">
-                        {track.coverArt && track.coverArt.startsWith('http') ? (
+                        {track.coverArt && (track.coverArt.startsWith('data:image/') || track.coverArt.startsWith('/')) ? (
                           <img src={track.coverArt} alt={track.title} className="w-full h-full object-cover" />
                         ) : (
                           <Music className="w-4 h-4" />

@@ -4,7 +4,7 @@ import App from './App.tsx';
 import './index.css';
 
 // Register PWA Service Worker
-if ('serviceWorker' in navigator) {
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker
       .register('/sw.js')

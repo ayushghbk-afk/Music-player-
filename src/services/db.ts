@@ -1,3 +1,4 @@
+import { validateBackup } from './backupSchema';
 import { openDB, IDBPDatabase } from 'idb';
 import { Capacitor } from '@capacitor/core';
 import { Track, Playlist, PlayerSettings, EQSettings, BackupPayload } from '../types';
@@ -191,6 +192,7 @@ export async function createFullBackupPayload(
 export async function restoreBackupPayload(
   payload: BackupPayload
 ): Promise<{ restoredPlaylists: number; restoredTracks: number }> {
+  payload = validateBackup(payload) as BackupPayload;
   const db = await getDB();
 
   let restoredTracks = 0;

@@ -37,7 +37,7 @@ public final class LocalTrackServer {
 
     private final TrackStore trackStore;
     private final String token;
-    private final ExecutorService connections = Executors.newCachedThreadPool();
+    private final ExecutorService connections = Executors.newFixedThreadPool(2);
     private ServerSocket serverSocket;
     private volatile boolean running;
 
@@ -165,9 +165,11 @@ public final class LocalTrackServer {
                 String contentLength = headers.get("content-length");
                 if (contentLength == null) {
                     respond(rawOut, 411, "Length Required", "{\"ok\":false,\"error\":\"missing content-length\"}");
+                    trackStore.abortWrite(write);
                     return -1;
                 }
                 long length = Long.parseLong(contentLength.trim());
+                if (length < 0 || length > 1073741824L) throw new IOException("Upload exceeds 1 GB");
                 total = copyFully(in, write.out, length);
             }
             trackStore.finishWrite(write);
@@ -206,6 +208,7 @@ public final class LocalTrackServer {
             int semicolon = sizeLine.indexOf(';');
             if (semicolon >= 0) sizeLine = sizeLine.substring(0, semicolon);
             long chunkSize = Long.parseLong(sizeLine.trim(), 16);
+            if (chunkSize < 0 || chunkSize + total > 1073741824L) throw new IOException("Upload exceeds 1 GB");
             if (chunkSize == 0) {
                 // Trailing headers until blank line (or immediate EOF of headers).
                 readLine(in);
@@ -296,7 +299,7 @@ public final class LocalTrackServer {
     private static void respond(OutputStream out, int status, String reason, String body) throws IOException {
         PrintWriter writer = new PrintWriter(new java.io.OutputStreamWriter(out, StandardCharsets.UTF_8), true);
         writer.print("HTTP/1.1 " + status + " " + reason + "\r\n");
-        writer.print("Access-Control-Allow-Origin: *\r\n");
+        writer.print("Access-Control-Allow-Origin: https://localhost\r\n");
         writer.print("Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n");
         writer.print("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With\r\n");
         writer.print("Access-Control-Max-Age: 86400\r\n");

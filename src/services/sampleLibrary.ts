@@ -139,11 +139,11 @@ export async function generateSynthesizedTrackBlob(
 }
 
 // Convert AudioBuffer to WAV Blob
-function audioBufferToWavBlob(buffer: AudioBuffer): Blob {
+export function audioBufferToWavBlob(buffer: Pick<AudioBuffer, 'numberOfChannels' | 'sampleRate' | 'length' | 'getChannelData'>): Blob {
   const numChannels = buffer.numberOfChannels;
   const sampleRate = buffer.sampleRate;
   const format = 1; // PCM
-  const bitDepth = 16;
+  const bitDepth = 24;
   const numSamples = buffer.length * numChannels;
   const bytesPerSample = bitDepth / 8;
   const blockAlign = numChannels * bytesPerSample;
@@ -178,9 +178,12 @@ function audioBufferToWavBlob(buffer: AudioBuffer): Blob {
   for (let i = 0; i < buffer.length; i++) {
     for (let channel = 0; channel < numChannels; channel++) {
       const sample = Math.max(-1, Math.min(1, buffer.getChannelData(channel)[i]));
-      const intSample = sample < 0 ? sample * 32768 : sample * 32767;
-      view.setInt16(offset, intSample, true);
-      offset += 2;
+      const intSample = sample < 0 ? sample * 8388608 : sample * 8388607;
+      const value = Math.round(intSample);
+      view.setUint8(offset, value & 255);
+      view.setUint8(offset + 1, (value >> 8) & 255);
+      view.setUint8(offset + 2, (value >> 16) & 255);
+      offset += 3;
     }
   }
 
@@ -194,15 +197,16 @@ export const INITIAL_SAMPLE_TRACKS: Omit<Track, 'audioUrl'>[] = [
     artist: 'Aetheria Ensemble',
     album: 'Cosmic Resonances Vol. I',
     duration: 25,
-    format: 'FLAC',
-    bitrate: '24-bit / 96kHz FLAC',
+    format: 'WAV',
+    bitrate: '24-bit / 96kHz WAV',
+    sampleRate: 96000, bitDepth: 24,
     isHiRes: true,
     addedAt: Date.now() - 86400000 * 5,
-    playCount: 14,
+    playCount: 0,
     year: 2026,
     genre: 'Ambient / Classical',
     trackNumber: 1,
-    fileSizeMB: 8.4,
+    fileSizeMB: 14.4,
     coverArt: 'linear-gradient(135deg, #0f172a 0%, #38bdf8 50%, #6366f1 100%)',
     lyrics: `[00:01.00] Drift into the infinite void...
 [00:06.00] Harmony echoing through celestial spheres.
@@ -211,19 +215,20 @@ export const INITIAL_SAMPLE_TRACKS: Omit<Track, 'audioUrl'>[] = [
   },
   {
     id: 'sample-track-2',
-    title: 'Quantum Echoes (Audiophile DSD)',
+    title: 'Quantum Echoes (Synthesized WAV)',
     artist: 'Luminous Void',
     album: 'Quantum Resonances',
     duration: 25,
-    format: 'DSD',
-    bitrate: '24-bit / 192kHz Master',
+    format: 'WAV',
+    bitrate: '24-bit / 96kHz WAV',
+    sampleRate: 96000, bitDepth: 24,
     isHiRes: true,
     addedAt: Date.now() - 86400000 * 4,
-    playCount: 22,
+    playCount: 0,
     year: 2026,
     genre: 'Electronic / IDM',
     trackNumber: 2,
-    fileSizeMB: 12.1,
+    fileSizeMB: 14.4,
     coverArt: 'linear-gradient(135deg, #18181b 0%, #a855f7 50%, #ec4899 100%)',
     lyrics: `[00:02.00] Pulse of the quantum lattice.
 [00:08.00] Analog synthesis in ultra-high sample rate.
@@ -236,14 +241,15 @@ export const INITIAL_SAMPLE_TRACKS: Omit<Track, 'audioUrl'>[] = [
     album: 'Deep Frequency Studies',
     duration: 25,
     format: 'WAV',
-    bitrate: '32-bit Float / 96kHz WAV',
+    bitrate: '24-bit / 96kHz WAV',
+    sampleRate: 96000, bitDepth: 24,
     isHiRes: true,
     addedAt: Date.now() - 86400000 * 3,
-    playCount: 38,
+    playCount: 0,
     year: 2025,
     genre: 'Audiophile Test / Bass',
     trackNumber: 3,
-    fileSizeMB: 14.5,
+    fileSizeMB: 14.4,
     coverArt: 'linear-gradient(135deg, #09090b 0%, #10b981 50%, #06b6d4 100%)',
     lyrics: `[00:01.00] Testing sub-30Hz acoustic boundaries.
 [00:10.00] 10-Band graphic equalizer precision test.`
@@ -254,34 +260,36 @@ export const INITIAL_SAMPLE_TRACKS: Omit<Track, 'audioUrl'>[] = [
     artist: 'Vector Wave',
     album: 'Neon Horizon 2088',
     duration: 25,
-    format: 'ALAC',
-    bitrate: '24-bit / 88.2kHz Lossless',
+    format: 'WAV',
+    bitrate: '24-bit / 96kHz WAV',
+    sampleRate: 96000, bitDepth: 24,
     isHiRes: true,
     addedAt: Date.now() - 86400000 * 2,
-    playCount: 19,
+    playCount: 0,
     year: 2026,
     genre: 'Synthwave / Cyberpunk',
     trackNumber: 4,
-    fileSizeMB: 7.8,
+    fileSizeMB: 14.4,
     coverArt: 'linear-gradient(135deg, #27272a 0%, #f59e0b 50%, #ef4444 100%)',
     lyrics: `[00:02.00] Speeding along the chrome highway.
 [00:11.00] Lock screen controls & background audio active.`
   },
   {
     id: 'sample-track-5',
-    title: 'Midnight Velvet (Acoustic Trio)',
+    title: 'Midnight Velvet (Jazz Synth)',
     artist: 'Nouveau Jazz Collective',
     album: 'Late Night Sessions',
     duration: 25,
-    format: 'FLAC',
-    bitrate: '24-bit / 96kHz FLAC',
+    format: 'WAV',
+    bitrate: '24-bit / 96kHz WAV',
+    sampleRate: 96000, bitDepth: 24,
     isHiRes: true,
     addedAt: Date.now() - 86400000 * 1,
-    playCount: 45,
+    playCount: 0,
     year: 2025,
     genre: 'Acoustic Jazz',
     trackNumber: 5,
-    fileSizeMB: 9.2,
+    fileSizeMB: 14.4,
     coverArt: 'linear-gradient(135deg, #1c1917 0%, #d97706 50%, #78350f 100%)',
     lyrics: `[00:03.00] Warm tube pre-amp simulation.
 [00:12.00] Smooth acoustic resonance.`

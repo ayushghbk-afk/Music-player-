@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { SplashScreen } from '@capacitor/splash-screen';
@@ -54,12 +54,12 @@ const DEFAULT_EQ: EQSettings = {
 
 const DEFAULT_SETTINGS: PlayerSettings = {
   gapless: true,
-  crossfadeSec: 2,
+  crossfadeSec: 0,
   theme: 'obsidian',
   visualizerMode: 'bars',
   volume: 0.85,
   playbackRate: 1,
-  resampleRate: '96khz',
+  resampleRate: 'native',
   autoPlayNext: true,
 };
 
@@ -75,6 +75,23 @@ const revokeTrackAudioUrls = (trackList: Track[]) => {
   });
 };
 
+let seedPromise: Promise<void> | null = null;
+async function seedLibrary() {
+  if (!seedPromise) seedPromise = (async () => {
+    if (await getKV('demoSeeded', false)) return;
+    const existing = await getAllTracks();
+    if (!existing.length) {
+      const types = ['celestial','quantum','obsidian','solar','jazz'] as const;
+      for (let i=0; i<INITIAL_SAMPLE_TRACKS.length; i++) {
+        const blob = await generateSynthesizedTrackBlob(types[i]);
+        await saveTrack({ ...INITIAL_SAMPLE_TRACKS[i], fileSizeMB: blob.size / 1048576 } as Track, blob);
+      }
+      await savePlaylist({ id: 'demo-vault', name: 'Studio Masters', description: 'Synthesized 24-bit / 96kHz demonstrations', trackIds: INITIAL_SAMPLE_TRACKS.map(t => t.id), createdAt: Date.now(), updatedAt: Date.now() });
+    }
+    await setKV('demoSeeded', true);
+  })().catch(error => { seedPromise = null; throw error; });
+  return seedPromise;
+}
 export default function App() {
   const [tracks, setTracks] = useState<Track[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
@@ -103,6 +120,15 @@ export default function App() {
   const [eqSettings, setEqSettings] = useState<EQSettings>(DEFAULT_EQ);
   const [playerSettings, setPlayerSettings] = useState<PlayerSettings>(DEFAULT_SETTINGS);
   const [storageUsedMB, setStorageUsedMB] = useState(0);
+  const [playbackError, setPlaybackError] = useState('');
+  const currentTrackRef = useRef<Track | null>(null);
+  currentTrackRef.current = currentTrack;
+  const restored = useRef(false);
+  const prepared = useRef(false);
+  const resumePosition = useRef(0);
+  const nextRef = useRef<(automatic?: boolean) => void>(() => {});
+  const persistAt = useRef(0);
+  const [showPlaybackSettings, setShowPlaybackSettings] = useState(false);
 
   // Native Android shell polish: black system bars, controlled splash, and stable WebView styling.
   useEffect(() => {
@@ -177,37 +203,20 @@ export default function App() {
 
   // Load or Seed Library
   const loadLibrary = useCallback(async () => {
-    let existingTracks = await getAllTracks();
-
-    // First time seed demo tracks
-    if (existingTracks.length === 0) {
-      const types: ('celestial' | 'quantum' | 'obsidian' | 'solar' | 'jazz')[] = [
-        'celestial',
-        'quantum',
-        'obsidian',
-        'solar',
-        'jazz',
-      ];
-
-      for (let i = 0; i < INITIAL_SAMPLE_TRACKS.length; i++) {
-        const meta = INITIAL_SAMPLE_TRACKS[i];
-        const type = types[i % types.length];
-        const audioBlob = await generateSynthesizedTrackBlob(type);
-        await saveTrack(meta as Track, audioBlob);
+    await seedLibrary();
+    const existingTracks = await getAllTracks();
+    if (!restored.current) {
+      const last = await getKV<{ id: string; position: number } | null>('lastPlayback', null);
+      if (last) {
+        const track = existingTracks.find(t => t.id === last.id);
+        if (track) { setCurrentTrack(track); setCurrentTime(last.position); resumePosition.current = last.position; }
       }
-
-      // Initial Playlist
-      const defaultPlaylist: Playlist = {
-        id: 'playlist-audiophile-master',
-        name: 'Hi-Res Studio Masters',
-        description: '24-Bit / 96kHz Lossless Demonstration Playlist',
-        trackIds: INITIAL_SAMPLE_TRACKS.map((t) => t.id),
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
-      await savePlaylist(defaultPlaylist);
-
-      existingTracks = await getAllTracks();
+      const nativeState = await audioEngine.syncNativeState();
+      if (nativeState?.trackId) {
+        const playingTrack=existingTracks.find(t=>t.id===nativeState.trackId);
+        if(playingTrack) { setCurrentTrack(playingTrack); setCurrentTime(nativeState.currentTime); setDuration(nativeState.duration); setIsPlaying(nativeState.isPlaying); prepared.current=true; resumePosition.current=0; }
+      }
+      restored.current = true;
     }
 
     setTracks((previousTracks) => {
@@ -226,6 +235,9 @@ export default function App() {
 
     const loadedSettings = await getKV<PlayerSettings>('playerSettings', DEFAULT_SETTINGS);
     setPlayerSettings(loadedSettings);
+    setVolume(loadedSettings.volume);
+    setGaplessEnabled(loadedSettings.gapless);
+    audioEngine.setPlaybackRate(loadedSettings.playbackRate);
     setTheme(loadedSettings.theme);
     setVisualizerMode(loadedSettings.visualizerMode);
 
@@ -234,8 +246,20 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    loadLibrary();
+    loadLibrary().catch(error => setPlaybackError("Library initialization failed: " + error.message));
   }, [loadLibrary]);
+
+  useEffect(() => {
+    audioEngine.setCallbacks({
+      onStateChange: setIsPlaying, onError: setPlaybackError, onEnded: () => nextRef.current(true),
+      onTimeUpdate: (position,duration) => {
+        setCurrentTime(position); setDuration(duration);
+        if (currentTrackRef.current && Date.now()-persistAt.current>3000) {
+          persistAt.current=Date.now(); void setKV('lastPlayback',{id:currentTrackRef.current.id,position});
+        }
+      },
+    });
+  }, []);
 
   // Apply EQ settings to audio engine whenever changed
   useEffect(() => {
@@ -244,15 +268,22 @@ export default function App() {
 
   // Handle Play Track
   const handlePlayTrack = async (track: Track) => {
+    setPlaybackError('');
+    prepared.current = true;
     setCurrentTrack(track);
-
+    audioEngine.setStartPosition(resumePosition.current);
+    resumePosition.current = 0;
     await audioEngine.playTrack(track, track.audioUrl, {
       onTimeUpdate: (cur, dur) => {
         setCurrentTime(cur);
         setDuration(dur);
+        if (Date.now() - persistAt.current > 3000) {
+          persistAt.current = Date.now();
+          void setKV('lastPlayback', { id: currentTrackRef.current?.id || track.id, position: cur });
+        }
 
         // Auto-update track duration in state & IndexedDB if real duration is loaded and differs
-        if (dur > 0 && Math.abs(Math.round(dur) - track.duration) > 1) {
+        if (!Capacitor.isNativePlatform() && dur > 0 && Math.abs(Math.round(dur) - track.duration) > 1) {
           const updatedDuration = Math.round(dur);
           const updatedTrack = { ...track, duration: updatedDuration };
           setTracks((prev) =>
@@ -264,28 +295,31 @@ export default function App() {
       onStateChange: (playing) => {
         setIsPlaying(playing);
       },
-      onEnded: () => {
-        handleNextTrack();
-      },
+      onError: message => setPlaybackError(message),
+      onEnded: () => nextRef.current(true),
     });
 
     audioEngine.applyEQ(eqSettings);
     audioEngine.setVolume(isMuted ? 0 : volume);
+    audioEngine.setPlaybackRate(playerSettings.playbackRate);
   };
 
   const handlePlayPause = () => {
     if (!currentTrack && tracks.length > 0) {
       handlePlayTrack(tracks[0]);
+    } else if (currentTrack && !prepared.current) {
+      handlePlayTrack(currentTrack);
     } else {
       audioEngine.togglePlayPause();
     }
   };
 
-  const handleNextTrack = () => {
+  const handleNextTrack = (automatic = false) => {
     if (tracks.length === 0) return;
+    if (automatic && (!playerSettings.autoPlayNext || (repeatMode === 'off' && !isShuffle && currentTrack?.id === tracks[tracks.length-1]?.id))) { setIsPlaying(false); return; }
     let nextIndex = 0;
 
-    if (repeatMode === 'one' && currentTrack) {
+    if (automatic && repeatMode === 'one' && currentTrack) {
       handlePlayTrack(currentTrack);
       return;
     }
@@ -299,6 +333,8 @@ export default function App() {
 
     handlePlayTrack(tracks[nextIndex]);
   };
+
+  nextRef.current = handleNextTrack;
 
   const handlePrevTrack = () => {
     if (tracks.length === 0) return;
@@ -314,12 +350,21 @@ export default function App() {
     handlePlayTrack(tracks[prevIndex]);
   };
 
+  useEffect(() => {
+    audioEngine.onNativeTrackChanged = id => {
+      const track=tracks.find(t=>t.id===id);
+      if(track) { setCurrentTrack(track); prepared.current=true; void setKV('lastPlayback',{id,position:0}); }
+    };
+    audioEngine.configureQueue(tracks,isShuffle,repeatMode,playerSettings.autoPlayNext).catch(error=>setPlaybackError('Native queue failed: '+error.message));
+    return () => { audioEngine.onNativeTrackChanged=undefined; };
+  }, [tracks,isShuffle,repeatMode,playerSettings.autoPlayNext]);
+
   // Register Media Session API Listeners for Lock Screen & Background playback
   useEffect(() => {
     audioEngine.registerMediaSessionHandlers({
       onPlay: () => setIsPlaying(true),
       onPause: () => setIsPlaying(false),
-      onNext: handleNextTrack,
+      onNext: () => handleNextTrack(),
       onPrevious: handlePrevTrack,
     });
   }, [tracks, currentTrack, isShuffle, repeatMode]);
@@ -429,6 +474,14 @@ export default function App() {
         <div className="w-[500px] h-[500px] bg-purple-700 rounded-full blur-[120px] translate-x-40 translate-y-20"></div>
       </div>
 
+      {playbackError && <div role="alert" className="absolute top-16 left-4 right-4 z-[120] bg-red-950 border border-red-500 p-4 rounded-xl text-sm flex gap-4"><span className="flex-1">{playbackError}</span><button onClick={() => setPlaybackError('')}>Dismiss</button></div>}
+      <button className="fixed right-4 top-20 z-30 text-xs bg-zinc-900 border border-white/10 rounded-lg px-3 py-2" onClick={() => setShowPlaybackSettings(!showPlaybackSettings)}>Playback settings</button>
+      {showPlaybackSettings && <section role="dialog" aria-label="Playback settings" className="fixed top-32 right-4 z-50 bg-zinc-950 border border-white/20 rounded-xl p-5 w-72 space-y-4 shadow-2xl">
+        <label className="block">Speed <select className="bg-zinc-800 p-2 rounded" value={playerSettings.playbackRate} onChange={e => { const updated={...playerSettings, playbackRate:Number(e.target.value)}; setPlayerSettings(updated); audioEngine.setPlaybackRate(updated.playbackRate); void setKV('playerSettings',updated); }}>{[0.5,0.75,1,1.25,1.5,2].map(n => <option key={n} value={n}>{n}×</option>)}</select></label>
+        <label className="flex gap-2"><input type="checkbox" checked={playerSettings.autoPlayNext} onChange={e => { const updated={...playerSettings,autoPlayNext:e.target.checked}; setPlayerSettings(updated); void setKV('playerSettings',updated); }} />Autoplay next</label>
+        <p className="text-xs text-zinc-400">Crossfade and forced 96/192 kHz output are not supported in this build. Output rate is chosen by the browser or Android mixer, not the source badge. Gapless is best-effort on native only.</p>
+        <button onClick={() => setShowPlaybackSettings(false)}>Close</button>
+      </section>}
       {/* Top Bar Header */}
       <header className="min-h-14 pt-[env(safe-area-inset-top,0px)] flex items-center justify-between px-3 sm:px-6 bg-black/40 border-b border-white/5 backdrop-blur-md z-20 flex-shrink-0 gap-2">
         <div className="flex items-center gap-2 sm:gap-4 min-w-0">
@@ -642,7 +695,7 @@ export default function App() {
         gaplessEnabled={gaplessEnabled}
         onPlayPause={handlePlayPause}
         onPrevTrack={handlePrevTrack}
-        onNextTrack={handleNextTrack}
+        onNextTrack={() => handleNextTrack()}
         onSeek={(sec) => {
           audioEngine.seek(sec);
           setCurrentTime(sec);
@@ -651,6 +704,7 @@ export default function App() {
           setVolume(val);
           setIsMuted(false);
           audioEngine.setVolume(val);
+          const updated = { ...playerSettings, volume: val }; setPlayerSettings(updated); void setKV('playerSettings', updated);
         }}
         onToggleMute={() => {
           const nextMute = !isMuted;
@@ -663,7 +717,7 @@ export default function App() {
           else if (repeatMode === 'all') setRepeatMode('one');
           else setRepeatMode('off');
         }}
-        onToggleGapless={() => setGaplessEnabled(!gaplessEnabled)}
+        onToggleGapless={() => { const updated={...playerSettings,gapless:!gaplessEnabled}; setGaplessEnabled(updated.gapless); setPlayerSettings(updated); void setKV('playerSettings',updated); }}
         onOpenEQ={() => setIsEQModalOpen(true)}
         onOpenFullscreen={() => setIsFullscreenOpen(true)}
         eqEnabled={eqSettings.enabled}
@@ -690,7 +744,7 @@ export default function App() {
           onClose={() => setIsFullscreenOpen(false)}
           onPlayPause={handlePlayPause}
           onPrevTrack={handlePrevTrack}
-          onNextTrack={handleNextTrack}
+          onNextTrack={() => handleNextTrack()}
           onSeek={(sec) => {
             audioEngine.seek(sec);
             setCurrentTime(sec);
@@ -698,6 +752,7 @@ export default function App() {
           onVolumeChange={(val) => {
             setVolume(val);
             audioEngine.setVolume(val);
+          const updated = { ...playerSettings, volume: val }; setPlayerSettings(updated); void setKV('playerSettings', updated);
           }}
           onToggleMute={() => {
             const nextMute = !isMuted;
@@ -727,12 +782,13 @@ export default function App() {
       />
 
       {/* Track Tag Editor Modal */}
-      <TrackTagEditor
+      {editingTrack && <TrackTagEditor
+        key={editingTrack.id}
         track={editingTrack}
         isOpen={!!editingTrack}
         onSaveTrack={handleSaveTrackTags}
         onClose={() => setEditingTrack(null)}
-      />
+      />}
 
       {/* Import Local Files Modal Dropzone */}
       <ImportDropzone

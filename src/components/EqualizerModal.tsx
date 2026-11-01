@@ -11,6 +11,7 @@ interface EqualizerModalProps {
 }
 
 const PRESETS: Record<string, { bands: number[]; preamp: number; bass: number; treble: number }> = {
+  'Flat': { bands: [0,0,0,0,0,0,0,0,0,0], preamp: 0, bass: 0, treble: 0 },
   'Audiophile Neutral': { bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], preamp: 0, bass: 0, treble: 0 },
   'Acoustic': { bands: [3, 2, 1, 0, 1, 2, 3, 2, 2, 3], preamp: 1, bass: 10, treble: 20 },
   'Bass Booster': { bands: [8, 6, 5, 3, 1, 0, 0, 0, 0, 0], preamp: -2, bass: 60, treble: 0 },

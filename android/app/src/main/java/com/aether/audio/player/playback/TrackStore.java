@@ -92,7 +92,7 @@ public final class TrackStore {
         File fallback = null;
         for (File file : files) {
             String name = file.getName();
-            if (!file.isFile() || name.endsWith(TEMP_SUFFIX)) continue;
+            if (!file.isFile() || name.contains(TEMP_SUFFIX)) continue;
             if (name.equals(prefix + "bin") && fallback == null) {
                 // Keep the extensionless fallback as a last resort.
                 fallback = file;
@@ -110,9 +110,7 @@ public final class TrackStore {
         String base = sanitize(trackId);
         String ext = normalizeExtension(extension);
         File target = new File(tracksDir, base + ext);
-        // Invalidate any previous version of this track before rewriting it.
-        //noinspection ResultOfMethodCallIgnored
-        target.delete();
+        // Preserve the committed version until the temporary upload succeeds.
         // Unique temp name so a concurrent server import and plugin fallback
         // import for the same track never collide on one temp file.
         File temp = new File(tracksDir, base + ext + TEMP_SUFFIX + "-" + System.nanoTime());
@@ -120,9 +118,9 @@ public final class TrackStore {
     }
 
     private static String normalizeExtension(String extension) {
-        String ext = extension == null ? "" : extension.trim();
-        if (ext.isEmpty() || "bin".equals(ext)) return ".bin";
-        return ext.startsWith(".") ? ext : "." + ext;
+        String ext = extension == null ? "bin" : extension.toLowerCase(java.util.Locale.ROOT).replaceFirst("^\\.", "");
+        if (!ext.matches("flac|wav|ogg|mp3|m4a|aac|alac|aiff|aif|bin")) throw new IllegalArgumentException("Invalid audio extension");
+        return "." + ext;
     }
 
     public void finishWrite(TempWrite write) throws IOException {

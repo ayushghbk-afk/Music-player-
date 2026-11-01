@@ -203,7 +203,7 @@ export const SongList: React.FC<SongListProps> = ({
                             : '#27272a',
                         }}
                       >
-                        {track.coverArt && track.coverArt.startsWith('http') ? (
+                        {track.coverArt && (track.coverArt.startsWith('data:image/') || track.coverArt.startsWith('/')) ? (
                           <img
                             src={track.coverArt}
                             alt={track.title}
@@ -375,7 +375,7 @@ export const SongList: React.FC<SongListProps> = ({
                                   : '#27272a',
                               }}
                             >
-                              {track.coverArt && track.coverArt.startsWith('http') ? (
+                              {track.coverArt && (track.coverArt.startsWith('data:image/') || track.coverArt.startsWith('/')) ? (
                                 <img
                                   src={track.coverArt}
                                   alt={track.title}

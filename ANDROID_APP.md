@@ -1,53 +1,15 @@
-# Aether Hi-Res Audio Player Android App
+# Android build notes
 
-This repository now includes a complete Capacitor Android shell for the React/Vite music player.
+See [README.md](README.md#android-build--apk) for the authoritative setup, signing secrets and current verification limitations.
 
-## What is included
-
-- Native Android project in `android/`
 - App ID: `com.aether.audio.player`
-- App name: `Aether Hi-Res Audio Player`
-- Android launcher icons and splash assets generated from the Aether Audio brand
-- Native Android permissions for audio import, microphone recording, wake lock, and audio settings
-- Capacitor App, Splash Screen, and Status Bar plugins
-- Android hardware back-button behavior in the React app
-- GitHub Actions workflow that builds a debug APK artifact
+- Capacitor 8, Media3 1.5.1, minSdk 24, compile/target SDK 36, Java 21
+- Version code 2 / version name 1.1.0
+- Playback: ExoPlayer owned by the main looper, MediaSessionService lifecycle, native queue and strict no-WebView-audio routing
+- DSP: `AetherDspProcessor` in the Media3 audio sink; ten peaking filters, two shelves, preamp, stereo width, PCM16 output
+- Local files: app-private `filesDir/aether-tracks`, metadata in IndexedDB, token-protected loopback raw-byte import with bounded Base64 fallback chunks
+- Cleartext denied globally; network security permits only localhost/127.0.0.1 for the import server. Mixed WebView content is denied, so import may use bridge chunks instead.
+- Playback service is non-exported; user audio is excluded from Android backup by `allowBackup=false`.
+- Release signing reads environment variables; no key is generated, stored or committed by the app.
 
-## Local build requirements
-
-- Node.js 22+
-- Java JDK 21
-- Android Studio / Android SDK
-
-## Build commands
-
-```bash
-npm ci
-npm run build:android
-npm run android:apk
-```
-
-The debug APK will be created at:
-
-```text
-android/app/build/outputs/apk/debug/app-debug.apk
-```
-
-## Open in Android Studio
-
-```bash
-npm run android:open
-```
-
-## Native playback (Media3)
-
-Android playback is no longer bound to the Capacitor WebView — and never falls back to it.
-
-- React UI still owns the library, queue, shuffle/repeat, and screens
-- Imports stream the audio blob once into **persistent** native storage (`filesDir/aether-tracks`) via the loopback `LocalTrackServer` — raw bytes, no Base64 on the happy path, no IndexedDB audio copy on Android
-- `PlaybackManager` + ExoPlayer / Media3 plays that file; playback commands wait for the foreground service to be alive first
-- `MusicPlayerService` is a `MediaSessionService` foreground service that survives task removal while playback is active
-
-That stack is what keeps audio alive when the screen locks, the app is backgrounded, or Bluetooth / notification controls are used. Headphone unplug and audio focus are handled natively.
-
-Web playback is unchanged in the browser.
+Build with `npm run android:apk`. A successful build emits `android/app/build/outputs/apk/debug/app-debug.apk`. This sandbox has no Java toolchain, so **no APK has been generated and native compilation remains unverified**. CI defines debug artifact upload and optional signed/minified release builds; run it in GitHub or use a local Android toolchain.

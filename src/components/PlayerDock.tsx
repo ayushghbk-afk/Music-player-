@@ -109,7 +109,7 @@ export const PlayerDock: React.FC<PlayerDockProps> = ({
                 : '#18181b',
             }}
           >
-            {currentTrack?.coverArt && currentTrack.coverArt.startsWith('http') ? (
+            {currentTrack?.coverArt && (currentTrack.coverArt.startsWith('data:image/') || currentTrack.coverArt.startsWith('/')) ? (
               <img src={currentTrack.coverArt} alt={currentTrack.title} className="w-full h-full object-cover" />
             ) : null}
           </div>
@@ -193,7 +193,7 @@ export const PlayerDock: React.FC<PlayerDockProps> = ({
                   : '#18181b',
               }}
             >
-              {currentTrack.coverArt && currentTrack.coverArt.startsWith('http') ? (
+              {currentTrack.coverArt && (currentTrack.coverArt.startsWith('data:image/') || currentTrack.coverArt.startsWith('/')) ? (
                 <img
                   src={currentTrack.coverArt}
                   alt={currentTrack.title}
@@ -295,7 +295,7 @@ export const PlayerDock: React.FC<PlayerDockProps> = ({
               ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-[0_0_8px_rgba(16,185,129,0.3)]'
               : 'bg-zinc-900 text-zinc-500 border-zinc-800 hover:text-zinc-300'
           }`}
-          title="Sub-millisecond Web Audio Gapless Buffer Engine"
+          title="Best-effort native gapless; browser transitions may have gaps"
         >
           <Zap className="w-3 h-3" />
           GAPLESS

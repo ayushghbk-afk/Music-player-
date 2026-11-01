@@ -19,6 +19,8 @@ export interface Track {
   trackNumber?: number;
   lyrics?: string;
   fileSizeMB?: number;
+  sampleRate?: number;
+  bitDepth?: number;
 }
 
 export interface Playlist {

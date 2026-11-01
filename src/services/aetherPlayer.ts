@@ -1,7 +1,9 @@
 import { registerPlugin, PluginListenerHandle } from '@capacitor/core';
+import type { EQSettings } from '../types';
 
 export interface AetherPlayerState {
   isPlaying: boolean;
+  trackId?: string;
   currentTime: number;
   duration: number;
   native?: boolean;
@@ -21,6 +23,8 @@ export interface ServerInfo {
 }
 
 export interface AetherPlayerPlugin {
+  setQueue(options: { tracks: { id: string; title: string; artist: string; album: string }[]; shuffle: boolean; repeat: 'off' | 'all' | 'one'; autoplay: boolean }): Promise<void>;
+  applyEQ(settings: EQSettings): Promise<void>;
   /** Loopback server info for streamed imports (preferred path). */
   getServerInfo(): Promise<ServerInfo>;
   /** True when the track's audio file already exists in native storage. */
@@ -90,6 +94,7 @@ export const extensionForTrack = (format?: string, mime?: string): string => {
   if (source.includes('flac')) return 'flac';
   if (source.includes('wav')) return 'wav';
   if (source.includes('ogg')) return 'ogg';
+  if (source.includes('alac')) return 'm4a';
   if (source.includes('aac') || source.includes('m4a')) return 'm4a';
   if (source.includes('mp3') || source.includes('mpeg')) return 'mp3';
   return 'bin';
@@ -135,11 +140,10 @@ const importViaServer = async (
 };
 
 const importViaChunks = async (options: TrackImportOptions, blob: Blob): Promise<void> => {
-  const buffer = await blob.arrayBuffer();
-  const chunks = arrayBufferToBase64Chunks(buffer);
   await AetherPlayer.beginCache(options);
-  for (const data of chunks) {
-    await AetherPlayer.appendCache({ data });
+  for (let offset = 0; offset < blob.size; offset += CHUNK_SIZE) {
+    const chunks = arrayBufferToBase64Chunks(await blob.slice(offset, offset + CHUNK_SIZE).arrayBuffer());
+    for (const data of chunks) await AetherPlayer.appendCache({ data });
   }
   await AetherPlayer.commitCache();
 };

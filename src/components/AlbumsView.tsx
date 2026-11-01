@@ -60,7 +60,7 @@ export const AlbumsView: React.FC<AlbumsViewProps> = ({ tracks, onPlayTrack }) =
                     : '#27272a',
                 }}
               >
-                {album.coverArt && album.coverArt.startsWith('http') ? (
+                {album.coverArt && (album.coverArt.startsWith('data:image/') || album.coverArt.startsWith('/')) ? (
                   <img
                     src={album.coverArt}
                     alt={album.name}

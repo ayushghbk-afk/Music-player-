@@ -15,6 +15,7 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import java.io.File;
 
 @CapacitorPlugin(name = "AetherPlayer")
+@androidx.media3.common.util.UnstableApi
 public class MusicPlayerPlugin extends Plugin implements PlaybackManager.Listener {
 
     private PlaybackManager manager;
@@ -190,8 +191,10 @@ public class MusicPlayerPlugin extends Plugin implements PlaybackManager.Listene
             call.reject("Missing url");
             return;
         }
+        Uri uri = Uri.parse(url);
+        if (!"file".equals(uri.getScheme()) && !"content".equals(uri.getScheme())) { call.reject("Only local audio is allowed"); return; }
         getBridge().executeOnMainThread(() -> {
-            playFromUri(Uri.parse(url), call);
+            playFromUri(uri, call);
             call.resolve(currentState());
         });
     }
@@ -240,6 +243,43 @@ public class MusicPlayerPlugin extends Plugin implements PlaybackManager.Listene
     }
 
     @PluginMethod
+    public void setQueue(PluginCall call) {
+        try {
+            org.json.JSONArray tracks = call.getArray("tracks");
+            java.util.List<androidx.media3.common.MediaItem> items = new java.util.ArrayList<>();
+            if (tracks != null) for(int i=0;i<tracks.length();i++) {
+                org.json.JSONObject track=tracks.getJSONObject(i);
+                File file=manager.findStoredTrack(track.getString("id"));
+                if(file==null) continue;
+                items.add(new androidx.media3.common.MediaItem.Builder().setMediaId(track.getString("id"))
+                    .setUri(Uri.fromFile(file)).setMediaMetadata(new androidx.media3.common.MediaMetadata.Builder()
+                    .setTitle(track.optString("title")).setArtist(track.optString("artist")).setAlbumTitle(track.optString("album")).build()).build());
+            }
+            int repeat = "one".equals(call.getString("repeat")) ? Player.REPEAT_MODE_ONE : "all".equals(call.getString("repeat")) ? Player.REPEAT_MODE_ALL : Player.REPEAT_MODE_OFF;
+            getBridge().executeOnMainThread(() -> {
+                manager.setQueue(items,call.getBoolean("shuffle",false),repeat,call.getBoolean("autoplay",true));
+                call.resolve();
+            });
+        } catch(Exception error) { call.reject("Invalid queue",error); }
+    }
+
+    @PluginMethod
+    public void applyEQ(PluginCall call) {
+        try {
+            org.json.JSONArray values = call.getArray("bands");
+            if (values == null || values.length() != 10) { call.reject("Expected ten EQ bands"); return; }
+            double[] bands = new double[10];
+            for(int i=0;i<10;i++) bands[i]=Math.max(-12, Math.min(12, values.getDouble(i)));
+            manager.applyEQ(call.getBoolean("enabled", true), bands,
+                Math.max(-12,Math.min(12,call.getDouble("preamp", 0d))),
+                Math.max(0,Math.min(100,call.getDouble("bassBoost", 0d))),
+                Math.max(0,Math.min(100,call.getDouble("trebleBoost", 0d))),
+                Math.max(0,Math.min(200,call.getDouble("stereoWidth", 100d))));
+            call.resolve();
+        } catch(Exception error) { call.reject("Invalid DSP settings", error); }
+    }
+
+    @PluginMethod
     public void getState(PluginCall call) {
         getBridge().executeOnMainThread(() -> call.resolve(currentState()));
     }
@@ -252,6 +292,13 @@ public class MusicPlayerPlugin extends Plugin implements PlaybackManager.Listene
     public void onIsPlayingChanged(boolean isPlaying) {
         JSObject data = currentState();
         data.put("type", "state");
+        notifyListeners("playerEvent", data);
+    }
+
+    @Override
+    public void onTrackChanged(String trackId) {
+        JSObject data = currentState();
+        data.put("type", "track"); data.put("trackId", trackId);
         notifyListeners("playerEvent", data);
     }
 
@@ -311,6 +358,7 @@ public class MusicPlayerPlugin extends Plugin implements PlaybackManager.Listene
         state.put("sdk", Build.VERSION.SDK_INT);
         Player player = manager.getPlayer();
         state.put("hasItem", player.getMediaItemCount() > 0);
+        if (player.getCurrentMediaItem() != null) state.put("trackId", player.getCurrentMediaItem().mediaId);
         return state;
     }
 }

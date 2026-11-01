@@ -175,7 +175,7 @@ export const FullscreenPlayer: React.FC<FullscreenPlayerProps> = ({
                 : '#18181b',
             }}
           >
-            {currentTrack.coverArt && currentTrack.coverArt.startsWith('http') ? (
+            {currentTrack.coverArt && (currentTrack.coverArt.startsWith('data:image/') || currentTrack.coverArt.startsWith('/')) ? (
               <img
                 src={currentTrack.coverArt}
                 alt={currentTrack.title}
