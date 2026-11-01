@@ -3,7 +3,9 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import path from 'path';
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
+  base: process.env.AETHER_BASE_PATH || (mode === 'pages' ? '/Music-player-/' : '/'),
+  define: { 'import.meta.env.VITE_STATIC_HOST': JSON.stringify(mode === 'pages') },
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
@@ -23,4 +25,4 @@ export default defineConfig({
       input: 'index.html',
     },
   },
-});
+}));

@@ -1,3 +1,5 @@
+> **Verification update (2026-11-01):** The original audit below predates the CI repair. Android `assembleDebug` + `lintDebug` and debug APK signature verification now pass in [GitHub Actions run 41317759218](https://github.com/ayushghbk-afk/Music-player-/actions/runs/41317759218). An actual debug APK is available as its `aether-debug-apk` artifact. References below to compilation being unverified describe the earlier audit, not the current build. Device testing and production release signing remain outstanding. See README.md and ANDROID_APP.md for current instructions.
+
 # Aether — feature and upgrade report
 
 Status: web/client/server builds and Capacitor sync pass; native APK compilation is blocked by the missing Java/Android toolchain. This is a substantial implementation, **not a fully verified release**. Each section deliberately contains one genuine strength and exactly five actionable weaknesses/risks, as requested.

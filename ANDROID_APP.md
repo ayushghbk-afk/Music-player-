@@ -12,4 +12,8 @@ See [README.md](README.md#android-build--apk) for the authoritative setup, signi
 - Playback service is non-exported; user audio is excluded from Android backup by `allowBackup=false`.
 - Release signing reads environment variables; no key is generated, stored or committed by the app.
 
-Build with `npm run android:apk`. A successful build emits `android/app/build/outputs/apk/debug/app-debug.apk`. This sandbox has no Java toolchain, so **no APK has been generated and native compilation remains unverified**. CI defines debug artifact upload and optional signed/minified release builds; run it in GitHub or use a local Android toolchain.
+Build with `npm run android:apk` on a machine with Java 21/SDK 36. A successful build emits `android/app/build/outputs/apk/debug/app-debug.apk`.
+
+**Verified in GitHub Actions:** [run 41317759218](https://github.com/ayushghbk-afk/Music-player-/actions/runs/41317759218) successfully compiled `assembleDebug`, passed `lintDebug`, verified the debug APK with `apksigner`, and uploaded `aether-debug-apk`. Download/extract that artifact to get `app-debug.apk`. The runner is pinned to Ubuntu 22.04 and uses its preinstalled SDK manager; API-27 theme attributes are version-qualified so minSdk 24 stays supported.
+
+The sandbox still has no native SDK. Physical-device playback, OEM background policies and signed/minified production release behavior remain unverified. The downloadable build uses a debug signing identity, not a release key.

@@ -229,11 +229,11 @@ export function BackupSyncCenter({
       <details className="server-details">
         <summary>
           <Settings2 size={16} /> Companion server settings{" "}
-          <span>Configure Android connection</span>
+          <span>Configure optional connection</span>
         </summary>
         <div>
           <label className="field-label">
-            HTTPS SERVER FOR ANDROID
+            HTTPS COMPANION SERVER
             <input
               value={base}
               placeholder="https://your-aether-server.example"
@@ -257,8 +257,8 @@ export function BackupSyncCenter({
             Save server
           </button>
           <p>
-            Web uses its own origin. Server CORS must allow https://localhost
-            for Android.
+            GitHub Pages and Android use the HTTPS companion server set here.
+            Its CORS allowlist must include this website origin or https://localhost for Android.
           </p>
         </div>
       </details>
