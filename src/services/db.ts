@@ -1,14 +1,24 @@
-import { validateBackup } from './backupSchema';
-import { openDB, IDBPDatabase } from 'idb';
-import { Capacitor } from '@capacitor/core';
-import { Track, Playlist, PlayerSettings, EQSettings, BackupPayload } from '../types';
-import { deleteNativeTrack, extensionForTrack, importTrackToNativeStore } from './aetherPlayer';
+import { validateBackup } from "./backupSchema";
+import { openDB, IDBPDatabase } from "idb";
+import { Capacitor } from "@capacitor/core";
+import {
+  Track,
+  Playlist,
+  PlayerSettings,
+  EQSettings,
+  BackupPayload,
+} from "../types";
+import {
+  deleteNativeTrack,
+  extensionForTrack,
+  importTrackToNativeStore,
+} from "./aetherPlayer";
 
-const DB_NAME = 'AetherAudioDB';
+const DB_NAME = "AetherAudioDB";
 const DB_VERSION = 1;
 
 const isAndroidNative = () =>
-  Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android';
+  Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android";
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
 
@@ -17,27 +27,27 @@ export function getDB(): Promise<IDBPDatabase> {
     dbPromise = openDB(DB_NAME, DB_VERSION, {
       upgrade(db) {
         // Track store (stores metadata + audio blob)
-        if (!db.objectStoreNames.contains('tracks')) {
-          const trackStore = db.createObjectStore('tracks', { keyPath: 'id' });
-          trackStore.createIndex('addedAt', 'addedAt');
-          trackStore.createIndex('title', 'title');
-          trackStore.createIndex('artist', 'artist');
-          trackStore.createIndex('album', 'album');
+        if (!db.objectStoreNames.contains("tracks")) {
+          const trackStore = db.createObjectStore("tracks", { keyPath: "id" });
+          trackStore.createIndex("addedAt", "addedAt");
+          trackStore.createIndex("title", "title");
+          trackStore.createIndex("artist", "artist");
+          trackStore.createIndex("album", "album");
         }
 
         // Playlists store
-        if (!db.objectStoreNames.contains('playlists')) {
-          db.createObjectStore('playlists', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains("playlists")) {
+          db.createObjectStore("playlists", { keyPath: "id" });
         }
 
         // Key-Value Store for settings & favorites
-        if (!db.objectStoreNames.contains('kv')) {
-          db.createObjectStore('kv');
+        if (!db.objectStoreNames.contains("kv")) {
+          db.createObjectStore("kv");
         }
 
         // Audio Blobs store for binary audio data
-        if (!db.objectStoreNames.contains('audioBlobs')) {
-          db.createObjectStore('audioBlobs');
+        if (!db.objectStoreNames.contains("audioBlobs")) {
+          db.createObjectStore("audioBlobs");
         }
       },
     });
@@ -55,24 +65,30 @@ export async function saveTrack(track: Track, blob?: Blob): Promise<void> {
   if (blob && isAndroidNative()) {
     try {
       await importTrackToNativeStore(
-        { trackId: track.id, extension: extensionForTrack(track.format, blob.type) },
-        blob
+        {
+          trackId: track.id,
+          extension: extensionForTrack(track.format, blob.type),
+        },
+        blob,
       );
       nativeStored = true;
     } catch (err) {
-      console.warn('Native track import failed; keeping IndexedDB copy as fallback:', err);
+      console.warn(
+        "Native track import failed; keeping IndexedDB copy as fallback:",
+        err,
+      );
     }
   }
 
   const db = await getDB();
-  const tx = db.transaction(['tracks', 'audioBlobs'], 'readwrite');
+  const tx = db.transaction(["tracks", "audioBlobs"], "readwrite");
 
   // Store track metadata without the ephemeral object URL
   const { audioUrl, ...trackMeta } = track;
-  await tx.objectStore('tracks').put(trackMeta);
+  await tx.objectStore("tracks").put(trackMeta);
 
   if (blob && !nativeStored) {
-    await tx.objectStore('audioBlobs').put(blob, track.id);
+    await tx.objectStore("audioBlobs").put(blob, track.id);
   }
   await tx.done;
 }
@@ -80,20 +96,26 @@ export async function saveTrack(track: Track, blob?: Blob): Promise<void> {
 // Get All Tracks
 export async function getAllTracks(): Promise<Track[]> {
   const db = await getDB();
-  const rawTracks = await db.getAll('tracks');
+  const rawTracks = await db.getAll("tracks");
 
   // Important: do not create blob object URLs for the whole library.
   // Large music libraries can otherwise pin every audio file in memory.
   // Playback fetches the selected track blob lazily inside audioEngine.
   return rawTracks
-    .map((track) => ({ ...track, audioUrl: undefined } as Track))
+    .map((track) => ({ ...track, audioUrl: undefined }) as Track)
     .sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
+}
+
+export async function getTrackMetadata(
+  trackId: string,
+): Promise<Track | undefined> {
+  return (await getDB()).get("tracks", trackId);
 }
 
 // Get Audio Blob for track
 export async function getTrackBlob(trackId: string): Promise<Blob | undefined> {
   const db = await getDB();
-  return db.get('audioBlobs', trackId);
+  return db.get("audioBlobs", trackId);
 }
 
 // Delete Track
@@ -103,46 +125,50 @@ export async function deleteTrack(trackId: string): Promise<void> {
     void deleteNativeTrack(trackId);
   }
   const db = await getDB();
-  const tx = db.transaction(['tracks', 'audioBlobs'], 'readwrite');
-  await tx.objectStore('tracks').delete(trackId);
-  await tx.objectStore('audioBlobs').delete(trackId);
+  const tx = db.transaction(["tracks", "audioBlobs"], "readwrite");
+  await tx.objectStore("tracks").delete(trackId);
+  await tx.objectStore("audioBlobs").delete(trackId);
   await tx.done;
 }
 
 // Playlists
 export async function getAllPlaylists(): Promise<Playlist[]> {
   const db = await getDB();
-  return db.getAll('playlists');
+  return db.getAll("playlists");
 }
 
 export async function savePlaylist(playlist: Playlist): Promise<void> {
   const db = await getDB();
-  await db.put('playlists', playlist);
+  await db.put("playlists", playlist);
 }
 
 export async function deletePlaylist(playlistId: string): Promise<void> {
   const db = await getDB();
-  await db.delete('playlists', playlistId);
+  await db.delete("playlists", playlistId);
 }
 
 // KV Store (Favorites, Settings, EQ)
 export async function getKV<T>(key: string, defaultValue: T): Promise<T> {
   const db = await getDB();
-  const val = await db.get('kv', key);
+  const val = await db.get("kv", key);
   return val !== undefined ? val : defaultValue;
 }
 
 export async function setKV<T>(key: string, value: T): Promise<void> {
   const db = await getDB();
-  await db.put('kv', value, key);
+  await db.put("kv", value, key);
 }
 
 // Storage stats calculation
-export async function getStorageStats(): Promise<{ usedMB: number; trackCount: number; playlistCount: number }> {
+export async function getStorageStats(): Promise<{
+  usedMB: number;
+  trackCount: number;
+  playlistCount: number;
+}> {
   try {
     const db = await getDB();
-    const tracks = await db.getAll('tracks');
-    const playlists = await db.getAll('playlists');
+    const tracks = await db.getAll("tracks");
+    const playlists = await db.getAll("playlists");
 
     let totalBytes = 0;
     if (navigator.storage && navigator.storage.estimate) {
@@ -168,17 +194,17 @@ export async function getStorageStats(): Promise<{ usedMB: number; trackCount: n
 // Full Export for Backup
 export async function createFullBackupPayload(
   settings: PlayerSettings,
-  eqSettings: EQSettings
+  eqSettings: EQSettings,
 ): Promise<BackupPayload> {
   const tracks = await getAllTracks();
   const playlists = await getAllPlaylists();
-  const favorites = await getKV<string[]>('favorites', []);
+  const favorites = await getKV<string[]>("favorites", []);
 
   // Exclude ephemeral object URLs from backup metadata
   const trackMetadata = tracks.map(({ audioUrl, ...rest }) => rest);
 
   return {
-    version: '1.0.0',
+    version: "1.0.0",
     exportedAt: new Date().toISOString(),
     playlists,
     favorites,
@@ -190,14 +216,14 @@ export async function createFullBackupPayload(
 
 // Import Backup
 export async function restoreBackupPayload(
-  payload: BackupPayload
+  payload: BackupPayload,
 ): Promise<{ restoredPlaylists: number; restoredTracks: number }> {
   payload = validateBackup(payload) as BackupPayload;
   const db = await getDB();
 
   let restoredTracks = 0;
   if (payload.trackMetadata && Array.isArray(payload.trackMetadata)) {
-    const tx = db.transaction('tracks', 'readwrite');
+    const tx = db.transaction("tracks", "readwrite");
     for (const meta of payload.trackMetadata) {
       const existing = await tx.store.get(meta.id);
       if (!existing) {
@@ -214,7 +240,7 @@ export async function restoreBackupPayload(
 
   let restoredPlaylists = 0;
   if (payload.playlists && Array.isArray(payload.playlists)) {
-    const tx = db.transaction('playlists', 'readwrite');
+    const tx = db.transaction("playlists", "readwrite");
     for (const pl of payload.playlists) {
       await tx.store.put(pl);
       restoredPlaylists++;
@@ -223,17 +249,19 @@ export async function restoreBackupPayload(
   }
 
   if (payload.favorites && Array.isArray(payload.favorites)) {
-    const existingFavs = await getKV<string[]>('favorites', []);
-    const mergedFavs = Array.from(new Set([...existingFavs, ...payload.favorites]));
-    await setKV('favorites', mergedFavs);
+    const existingFavs = await getKV<string[]>("favorites", []);
+    const mergedFavs = Array.from(
+      new Set([...existingFavs, ...payload.favorites]),
+    );
+    await setKV("favorites", mergedFavs);
   }
 
   if (payload.settings) {
-    await setKV('playerSettings', payload.settings);
+    await setKV("playerSettings", payload.settings);
   }
 
   if (payload.eqSettings) {
-    await setKV('eqSettings', payload.eqSettings);
+    await setKV("eqSettings", payload.eqSettings);
   }
 
   return { restoredPlaylists, restoredTracks };

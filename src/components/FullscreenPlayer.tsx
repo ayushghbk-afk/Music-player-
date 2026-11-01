@@ -15,6 +15,8 @@ import {
   Headphones,
 } from "lucide-react";
 import { Track, VisualizerMode } from "../types";
+import { LyricsView } from "./LyricsView";
+import { audioEngine } from "../services/audioEngine";
 import { AudioVisualizer } from "./AudioVisualizer";
 import { Artwork, displayTitle, timeLabel } from "./Artwork";
 import { useDialogFocus } from "./useDialogFocus";
@@ -40,6 +42,7 @@ interface FullscreenPlayerProps {
   onToggleRepeat: () => void;
   onOpenEQ: () => void;
   eqEnabled?: boolean;
+  onEditLyrics?: () => void;
 }
 
 export function FullscreenPlayer(p: FullscreenPlayerProps) {
@@ -110,18 +113,33 @@ export function FullscreenPlayer(p: FullscreenPlayerProps) {
                   <span>LIVE ANALYSER</span>
                   <select
                     aria-label="Visualization mode"
-                    value={p.visualizerMode}
+                    value={
+                      audioEngine.isNative() ? "vu-meter" : p.visualizerMode
+                    }
                     onChange={(e) =>
                       p.onChangeVisualizerMode(e.target.value as VisualizerMode)
                     }
                   >
-                    <option value="bars">Frequency bars</option>
-                    <option value="wave">Oscilloscope</option>
-                    <option value="nebula">Circular nebula</option>
-                    <option value="31-band">31-band spectrum</option>
+                    <option value="bars" disabled={audioEngine.isNative()}>
+                      Frequency bars
+                    </option>
+                    <option value="wave" disabled={audioEngine.isNative()}>
+                      Oscilloscope
+                    </option>
+                    <option value="nebula" disabled={audioEngine.isNative()}>
+                      Circular nebula
+                    </option>
+                    <option value="31-band" disabled={audioEngine.isNative()}>
+                      31-band spectrum
+                    </option>
                     <option value="vu-meter">Analog VU meter</option>
                   </select>
                 </label>
+                {audioEngine.isNative() && (
+                  <small>
+                    Native PCM stereo RMS · spectrum modes are browser-only.
+                  </small>
+                )}
                 <div className="immersive-canvas">
                   <AudioVisualizer
                     mode={p.visualizerMode}
@@ -130,19 +148,12 @@ export function FullscreenPlayer(p: FullscreenPlayerProps) {
                 </div>
               </>
             ) : tab === "lyrics" ? (
-              <div className="immersive-lyrics">
-                {track.lyrics ? (
-                  track.lyrics
-                    .split("\n")
-                    .map((line, i) => (
-                      <p key={i}>
-                        {line.replace(/^\[\d+:\d+(?:\.\d+)?\]\s*/, "")}
-                      </p>
-                    ))
-                ) : (
-                  <p>No lyrics yet. You can add them in track details.</p>
-                )}
-              </div>
+              <LyricsView
+                lyrics={track.lyrics}
+                currentTime={p.currentTime}
+                onSeek={p.onSeek}
+                onImport={p.onEditLyrics}
+              />
             ) : (
               <dl className="immersive-specs">
                 {[

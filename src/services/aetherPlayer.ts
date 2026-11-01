@@ -1,8 +1,9 @@
-import { registerPlugin, PluginListenerHandle } from '@capacitor/core';
-import type { EQSettings } from '../types';
+import { registerPlugin, PluginListenerHandle } from "@capacitor/core";
+import type { EQSettings } from "../types";
 
 export interface AetherPlayerState {
   isPlaying: boolean;
+  meter?: { left: number; right: number; peak: number; overloaded: boolean };
   trackId?: string;
   currentTime: number;
   duration: number;
@@ -23,7 +24,12 @@ export interface ServerInfo {
 }
 
 export interface AetherPlayerPlugin {
-  setQueue(options: { tracks: { id: string; title: string; artist: string; album: string }[]; shuffle: boolean; repeat: 'off' | 'all' | 'one'; autoplay: boolean }): Promise<void>;
+  setQueue(options: {
+    tracks: { id: string; title: string; artist: string; album: string }[];
+    shuffle: boolean;
+    repeat: "off" | "all" | "one";
+    autoplay: boolean;
+  }): Promise<void>;
   applyEQ(settings: EQSettings): Promise<void>;
   /** Loopback server info for streamed imports (preferred path). */
   getServerInfo(): Promise<ServerInfo>;
@@ -66,12 +72,12 @@ export interface AetherPlayerPlugin {
   setPlaybackRate(options: { rate: number }): Promise<void>;
   getState(): Promise<AetherPlayerState>;
   addListener(
-    eventName: 'playerEvent',
-    listenerFunc: (event: AetherPlayerState) => void
+    eventName: "playerEvent",
+    listenerFunc: (event: AetherPlayerState) => void,
   ): Promise<PluginListenerHandle>;
 }
 
-export const AetherPlayer = registerPlugin<AetherPlayerPlugin>('AetherPlayer');
+export const AetherPlayer = registerPlugin<AetherPlayerPlugin>("AetherPlayer");
 
 const CHUNK_SIZE = 48 * 1024;
 
@@ -79,8 +85,11 @@ export const arrayBufferToBase64Chunks = (buffer: ArrayBuffer): string[] => {
   const bytes = new Uint8Array(buffer);
   const chunks: string[] = [];
   for (let offset = 0; offset < bytes.length; offset += CHUNK_SIZE) {
-    const slice = bytes.subarray(offset, Math.min(offset + CHUNK_SIZE, bytes.length));
-    let binary = '';
+    const slice = bytes.subarray(
+      offset,
+      Math.min(offset + CHUNK_SIZE, bytes.length),
+    );
+    let binary = "";
     for (let i = 0; i < slice.length; i++) {
       binary += String.fromCharCode(slice[i]);
     }
@@ -90,14 +99,14 @@ export const arrayBufferToBase64Chunks = (buffer: ArrayBuffer): string[] => {
 };
 
 export const extensionForTrack = (format?: string, mime?: string): string => {
-  const source = `${format || ''} ${mime || ''}`.toLowerCase();
-  if (source.includes('flac')) return 'flac';
-  if (source.includes('wav')) return 'wav';
-  if (source.includes('ogg')) return 'ogg';
-  if (source.includes('alac')) return 'm4a';
-  if (source.includes('aac') || source.includes('m4a')) return 'm4a';
-  if (source.includes('mp3') || source.includes('mpeg')) return 'mp3';
-  return 'bin';
+  const source = `${format || ""} ${mime || ""}`.toLowerCase();
+  if (source.includes("flac")) return "flac";
+  if (source.includes("wav")) return "wav";
+  if (source.includes("ogg")) return "ogg";
+  if (source.includes("alac")) return "m4a";
+  if (source.includes("aac") || source.includes("m4a")) return "m4a";
+  if (source.includes("mp3") || source.includes("mpeg")) return "mp3";
+  return "bin";
 };
 
 /**
@@ -107,13 +116,16 @@ export const extensionForTrack = (format?: string, mime?: string): string => {
  */
 const rawFetch = (): typeof fetch => {
   const original = (window as any).CapacitorWebFetch;
-  return typeof original === 'function' ? original.bind(window) : window.fetch.bind(window);
+  return typeof original === "function"
+    ? original.bind(window)
+    : window.fetch.bind(window);
 };
 
 let cachedServerInfo: ServerInfo | null = null;
 
 const serverInfo = async (): Promise<ServerInfo> => {
-  if (cachedServerInfo && cachedServerInfo.available && cachedServerInfo.port) return cachedServerInfo;
+  if (cachedServerInfo && cachedServerInfo.available && cachedServerInfo.port)
+    return cachedServerInfo;
   cachedServerInfo = await AetherPlayer.getServerInfo();
   return cachedServerInfo;
 };
@@ -121,16 +133,16 @@ const serverInfo = async (): Promise<ServerInfo> => {
 const importViaServer = async (
   options: TrackImportOptions,
   blob: Blob,
-  info: ServerInfo
+  info: ServerInfo,
 ): Promise<void> => {
   if (!info.available || !info.port || !info.token) {
-    throw new Error('Streaming server unavailable');
+    throw new Error("Streaming server unavailable");
   }
   const url =
     `http://127.0.0.1:${info.port}/import/${encodeURIComponent(options.trackId)}` +
     `?ext=${encodeURIComponent(options.extension)}&token=${encodeURIComponent(info.token)}`;
   const response = await rawFetch()(url, {
-    method: 'POST',
+    method: "POST",
     body: blob,
     keepalive: false,
   });
@@ -139,10 +151,15 @@ const importViaServer = async (
   }
 };
 
-const importViaChunks = async (options: TrackImportOptions, blob: Blob): Promise<void> => {
+const importViaChunks = async (
+  options: TrackImportOptions,
+  blob: Blob,
+): Promise<void> => {
   await AetherPlayer.beginCache(options);
   for (let offset = 0; offset < blob.size; offset += CHUNK_SIZE) {
-    const chunks = arrayBufferToBase64Chunks(await blob.slice(offset, offset + CHUNK_SIZE).arrayBuffer());
+    const chunks = arrayBufferToBase64Chunks(
+      await blob.slice(offset, offset + CHUNK_SIZE).arrayBuffer(),
+    );
     for (const data of chunks) await AetherPlayer.appendCache({ data });
   }
   await AetherPlayer.commitCache();
@@ -159,16 +176,16 @@ const importViaChunks = async (options: TrackImportOptions, blob: Blob): Promise
  */
 export const importTrackToNativeStore = async (
   options: TrackImportOptions,
-  blob: Blob
-): Promise<'streamed' | 'chunked'> => {
+  blob: Blob,
+): Promise<"streamed" | "chunked"> => {
   try {
     const info = await serverInfo();
     await importViaServer(options, blob, info);
-    return 'streamed';
+    return "streamed";
   } catch {
     cachedServerInfo = null; // re-probe next time
     await importViaChunks(options, blob);
-    return 'chunked';
+    return "chunked";
   }
 };
 

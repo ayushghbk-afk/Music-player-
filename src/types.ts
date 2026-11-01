@@ -1,4 +1,11 @@
-export type AudioFormat = 'FLAC' | 'WAV' | 'ALAC' | 'MP3' | 'AAC' | 'OGG' | 'DSD';
+export type AudioFormat =
+  | "FLAC"
+  | "WAV"
+  | "ALAC"
+  | "MP3"
+  | "AAC"
+  | "OGG"
+  | "DSD";
 
 export interface Track {
   id: string;
@@ -18,6 +25,7 @@ export interface Track {
   genre?: string;
   trackNumber?: number;
   lyrics?: string;
+  originalFileName?: string;
   fileSizeMB?: number;
   sampleRate?: number;
   bitDepth?: number;
@@ -42,10 +50,24 @@ export interface EQSettings {
   bassBoost: number; // 0 to 100
   trebleBoost: number; // 0 to 100
   stereoWidth: number; // 0 to 200 (100 = normal)
+  autoHeadroom?: boolean;
+  peakProtection?: boolean;
+  balance?: number; // -1 left, +1 right
+  mono?: boolean;
 }
 
-export type ThemeOption = 'obsidian' | 'sapphire' | 'cyberpunk' | 'studio-gold' | 'slate';
-export type VisualizerMode = 'bars' | 'wave' | 'nebula' | 'vu-meter' | '31-band';
+export type ThemeOption =
+  | "obsidian"
+  | "sapphire"
+  | "cyberpunk"
+  | "studio-gold"
+  | "slate";
+export type VisualizerMode =
+  | "bars"
+  | "wave"
+  | "nebula"
+  | "vu-meter"
+  | "31-band";
 
 export interface PlayerSettings {
   gapless: boolean;
@@ -54,8 +76,9 @@ export interface PlayerSettings {
   visualizerMode: VisualizerMode;
   volume: number;
   playbackRate: number;
-  resampleRate: 'native' | '96khz' | '192khz';
+  resampleRate: "native" | "96khz" | "192khz";
   autoPlayNext: boolean;
+  autoTheme?: boolean;
 }
 
 export interface BackupPayload {
@@ -64,7 +87,7 @@ export interface BackupPayload {
   name?: string;
   playlists: Playlist[];
   favorites: string[];
-  trackMetadata: Array<Omit<Track, 'audioUrl'>>;
+  trackMetadata: Array<Omit<Track, "audioUrl">>;
   settings: PlayerSettings;
   eqSettings: EQSettings;
 }

@@ -43,6 +43,7 @@ public final class PlaybackManager {
 
     public interface Listener {
         void onIsPlayingChanged(boolean isPlaying);
+        void onBufferingChanged(boolean buffering);
         void onEnded();
         void onTrackChanged(String trackId);
         void onPosition(long positionMs, long durationMs);
@@ -65,6 +66,9 @@ public final class PlaybackManager {
     private final List<Listener> listeners = new ArrayList<>();
     private final SharedPreferences prefs;
 
+    private long playRequest = 0;
+    private float targetVolume = 1f;
+    private boolean switching = false;
     private boolean noisyRegistered;
     private TrackStore.TempWrite activeWrite;
     private volatile boolean serviceReady = false;
@@ -83,7 +87,7 @@ public final class PlaybackManager {
         public void run() {
             notifyPosition();
             persistPositionThrottled();
-            mainHandler.postDelayed(this, 500);
+            mainHandler.postDelayed(this, 100);
         }
     };
 
@@ -136,6 +140,8 @@ public final class PlaybackManager {
                     mainHandler.removeCallbacks(positionTick);
                     mainHandler.post(positionTick);
                 } else {
+                    mainHandler.removeCallbacks(positionTick);
+                    notifyPosition();
                     unregisterNoisy();
                     persistPosition();
                 }
@@ -146,6 +152,7 @@ public final class PlaybackManager {
 
             @Override
             public void onPlaybackStateChanged(int playbackState) {
+                for (Listener listener : copyListeners()) listener.onBufferingChanged(playbackState == Player.STATE_BUFFERING);
                 if (playbackState == Player.STATE_ENDED) {
                     persistPosition(0);
                     for (Listener listener : copyListeners()) {
@@ -282,8 +289,8 @@ public final class PlaybackManager {
         for (Listener listener : copyListeners()) listener.onError(message);
     }
 
-    public void applyEQ(boolean enabled, double[] bands, double preamp, double bass, double treble, double width) {
-        dsp.update(enabled, bands, preamp, bass, treble, width);
+    public void applyEQ(boolean enabled, double[] bands, double preamp, double bass, double treble, double width, boolean headroom, boolean protection, double balance, boolean mono) {
+        dsp.update(enabled, bands, preamp, bass, treble, width, headroom, protection, balance, mono);
     }
 
     private void drainPendingCommands() {
@@ -306,8 +313,22 @@ public final class PlaybackManager {
         playUri(Uri.fromFile(file), title, artist, album, startPositionMs);
     }
 
+    public AetherDspProcessor.Meter getMeter() { return dsp.getMeter(); }
+    public float getVolume() { return player.getVolume(); }
+
     public void playUri(final Uri uri, final String title, final String artist, final String album, final long startPositionMs) {
+        final long request = ++playRequest;
         runWhenServiceReady(() -> {
+            if(request!=playRequest) return;
+            switching=true;
+            float initial=player.getVolume();
+            // Short de-click ramp. Stale scheduled switches cannot replace the newest selection.
+            for(int step=1;step<=3;step++) {
+                final float fraction=1-step/3f;
+                mainHandler.postDelayed(() -> { if(request==playRequest) player.setVolume(initial*fraction); },step*5L);
+            }
+            mainHandler.postDelayed(() -> {
+            if(request!=playRequest) return;
             MediaMetadata metadata = new MediaMetadata.Builder()
                     .setTitle(title)
                     .setArtist(artist)
@@ -326,6 +347,9 @@ public final class PlaybackManager {
             else player.setMediaItem(item, Math.max(0,startPositionMs));
             player.prepare();
             player.play();
+            switching=false;
+            player.setVolume(targetVolume);
+            }, 18);
         });
     }
 
@@ -341,6 +365,9 @@ public final class PlaybackManager {
     }
 
     public void pause() {
+        ++playRequest;
+        switching=false;
+        player.setVolume(targetVolume);
         synchronized (pendingCommands) { pendingCommands.clear(); }
         player.pause();
         persistPosition();
@@ -352,7 +379,8 @@ public final class PlaybackManager {
     }
 
     public void setVolume(float volume) {
-        player.setVolume(Math.max(0f, Math.min(1f, volume)));
+        targetVolume=Math.max(0f, Math.min(1f, volume));
+        if(!switching) player.setVolume(targetVolume);
     }
 
     public void setPlaybackRate(float rate) {

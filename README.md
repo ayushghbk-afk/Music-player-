@@ -131,3 +131,11 @@ See the required feature-by-feature strengths/risks report in `FEATURE_REPORT.md
 Assumed metadata-only backup (never upload user audio), explicit opt-in AI, OpenAI-compatible provider, single-node persistent SQLite deployment, 25-second synthesized demos and library-only tag edits. No API keys, signing secrets or user music are bundled.
 
 Roadmap: LRC synchronization, sleep timer, queue editor, Android Auto, smart playlists, ReplayGain, folder scanning, future IndexedDB migrations, broader tests, accessibility audit, crossfade, resampling and native analyser telemetry.
+
+### Audio stability, artwork colors and studio monitoring
+
+This update guards rapid track changes, smooths DSP changes, adds real stereo RMS Analog VU metering on web **and native Android**, and defaults to safe headroom/peak protection. In **Playback settings**, “Follow album artwork colors” links the room background and meters to the displayed cover; choosing a manual theme turns it off.
+
+Import `.lrc` / `.txt` from a track’s tag editor, or import uniquely matching-name sidecars alongside your audio. In Now Playing → Lyrics, timestamped lines follow playback and can be tapped to seek. The studio adds mono/balance, A/B snapshots, measured levels, device-local custom presets and validated EQ JSON import/export. Loading now distinguishes file preparation, buffering and actual playback.
+
+See [AUDIO_UPGRADE_REPORT.md](AUDIO_UPGRADE_REPORT.md) for precise capabilities, limitations, validation and APK instructions. Native spectrum modes are deliberately not simulated; Android uses measured RMS VU. Peak protection is not a transparent true-peak limiter, and A/B is not loudness-matched.

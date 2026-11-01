@@ -12,6 +12,9 @@ import {
 } from "lucide-react";
 import { EQSettings } from "../types";
 import { audioEngine, EQ_FREQUENCIES } from "../services/audioEngine";
+import { StudioTools } from "./StudioTools";
+import { AudioVisualizer } from "./AudioVisualizer";
+import { eqCoefficients, responseDb, headroomDb } from "../services/dsp";
 import { useDialogFocus } from "./useDialogFocus";
 
 interface EqualizerModalProps {
@@ -93,23 +96,16 @@ const EqualizerGraph: React.FC<{
   const graphHeight = height - paddingY * 2;
   const centerY = paddingY + graphHeight / 2;
 
+  const sampleRate = audioEngine.getDspSampleRate();
+  const coefficients = eqCoefficients(eqSettings, sampleRate);
+  const reduction = headroomDb(eqSettings, sampleRate);
   const bandPoints = EQ_FREQUENCIES.map((freq, i) => {
     const x = paddingX + (i / 9) * graphWidth;
     const bandVal = eqSettings.bands[i] || 0;
-    const preampVal = eqSettings.preamp || 0;
-
-    let bassContrib = 0;
-    if (i === 0) bassContrib = (eqSettings.bassBoost / 100) * 5;
-    else if (i === 1) bassContrib = (eqSettings.bassBoost / 100) * 3.5;
-    else if (i === 2) bassContrib = (eqSettings.bassBoost / 100) * 1.8;
-
-    let trebleContrib = 0;
-    if (i === 9) trebleContrib = (eqSettings.trebleBoost / 100) * 5;
-    else if (i === 8) trebleContrib = (eqSettings.trebleBoost / 100) * 3.5;
-    else if (i === 7) trebleContrib = (eqSettings.trebleBoost / 100) * 1.8;
-
     const netDb = eqSettings.enabled
-      ? bandVal + preampVal + bassContrib + trebleContrib
+      ? responseDb(coefficients, freq, sampleRate) +
+        eqSettings.preamp -
+        reduction
       : 0;
     const clampedDb = Math.max(-18, Math.min(18, netDb));
     const y = centerY - (clampedDb / 18) * (graphHeight / 2);
@@ -359,119 +355,19 @@ const EqualizerGraph: React.FC<{
   );
 };
 
-/* Realtime Audio Spectrum Analyzer Graph Component */
-const RealtimeSpectrumGraph: React.FC<{ eqSettings: EQSettings }> = ({
-  eqSettings,
-}) => {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    const freqArray = new Uint8Array(64);
-    const timeDomainArray = new Uint8Array(64);
-    let animationFrameId: number;
-
-    const render = () => {
-      audioEngine.getAnalyserData(freqArray, timeDomainArray);
-
-      const width = canvas.width;
-      const height = canvas.height;
-      ctx.clearRect(0, 0, width, height);
-
-      // Grid lines
-      ctx.strokeStyle = "rgba(255,255,255,0.05)";
-      ctx.lineWidth = 1;
-      for (let y = 20; y < height - 10; y += 25) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(width, y);
-        ctx.stroke();
-      }
-
-      // Draw 32 Spectrum Frequency Bars
-      const barCount = 32;
-      const paddingX = 25;
-      const graphW = width - paddingX * 2;
-      const barW = (graphW / barCount) * 0.7;
-      const gap = (graphW / barCount) * 0.3;
-
-      for (let i = 0; i < barCount; i++) {
-        const rawVal = freqArray[i % freqArray.length] / 255;
-        const barH = Math.max(3, rawVal * (height - 35));
-        const x = paddingX + i * (barW + gap);
-        const y = height - 18 - barH;
-
-        const grad = ctx.createLinearGradient(0, height, 0, 0);
-        grad.addColorStop(0, "#10b981");
-        grad.addColorStop(0.5, "#e5a68c");
-        grad.addColorStop(1, "#a855f7");
-
-        ctx.fillStyle = eqSettings.enabled ? grad : "rgba(255,255,255,0.1)";
-        ctx.beginPath();
-        ctx.roundRect(x, y, barW, barH, [3, 3, 0, 0]);
-        ctx.fill();
-
-        // Top peak indicator light
-        ctx.fillStyle = eqSettings.enabled ? "#ffffff" : "#71717a";
-        ctx.fillRect(x, Math.max(2, y - 3), barW, 2);
-      }
-
-      // Live Envelope Curve Overlay
-      ctx.beginPath();
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = eqSettings.enabled ? "#e5a68c" : "#52525b";
-      for (let i = 0; i < barCount; i++) {
-        const rawVal = freqArray[i % freqArray.length] / 255;
-        const barH = Math.max(3, rawVal * (height - 35));
-        const x = paddingX + i * (barW + gap) + barW / 2;
-        const y = height - 18 - barH;
-
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      }
-      ctx.stroke();
-
-      animationFrameId = requestAnimationFrame(render);
-    };
-
-    animationFrameId = requestAnimationFrame(render);
-    return () => cancelAnimationFrame(animationFrameId);
-  }, [eqSettings.enabled]);
-
-  return (
-    <div className="bg-zinc-950/90 rounded-2xl border border-white/10 p-3 shadow-inner space-y-1 relative overflow-hidden select-none">
-      <div className="flex items-center justify-between text-[11px] font-mono text-zinc-400 px-1">
-        <div className="flex items-center gap-2">
-          <BarChart2 className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-          <span className="font-bold text-white uppercase tracking-wider text-[10px]">
-            Real-Time Spectrum Analyzer
-          </span>
-          <span className="text-[9px] px-1.5 py-0.2 rounded font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-            FFT LIVE MONITOR
-          </span>
-        </div>
-        <div className="flex items-center gap-3 text-[9px] font-mono text-zinc-400">
-          <span>20 Hz</span>
-          <span>1 kHz</span>
-          <span>20 kHz</span>
-        </div>
-      </div>
-
-      <div className="relative w-full h-32">
-        <canvas
-          ref={canvasRef}
-          width={600}
-          height={140}
-          className="w-full h-full block rounded-xl"
-        />
-      </div>
+/* Real post-volume browser FFT; Android uses the PCM RMS meter instead. */
+const RealtimeSpectrumGraph: React.FC<{ eqSettings: EQSettings }> = () => (
+  <div className="studio-fft">
+    <div className="studio-fft-summary">
+      <span>WEB AUDIO · POST-VOLUME FFT</span>
+      <span>0 – {(audioEngine.getDspSampleRate() / 2000).toFixed(1)} kHz</span>
     </div>
-  );
-};
+    <div style={{ height: 140 }}>
+      <AudioVisualizer mode="bars" isPlaying={!audioEngine.isPaused()} />
+    </div>
+    <small>Frequency display only; not a calibrated 31-band measurement.</small>
+  </div>
+);
 
 export const EqualizerModal: React.FC<EqualizerModalProps> = ({
   isOpen,
@@ -570,6 +466,10 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
                 bassBoost: 0,
                 trebleBoost: 0,
                 stereoWidth: 100,
+                balance: 0,
+                mono: false,
+                autoHeadroom: true,
+                peakProtection: true,
               })
             }
           >
@@ -578,7 +478,7 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
         </div>
         <div className="eq-graph-header">
           <span className="eyebrow">
-            {graphMode === "control" ? "FREQUENCY RESPONSE" : "LIVE SPECTRUM"}
+            {graphMode === "control" ? "ESTIMATED RESPONSE" : "LIVE SIGNAL"}
           </span>
           <div className="segmented-control">
             <button
@@ -591,17 +491,25 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
               className={graphMode === "spectrum" ? "selected" : ""}
               onClick={() => setGraphMode("spectrum")}
             >
-              Spectrum
+              {audioEngine.isNative() ? "RMS meters" : "Spectrum"}
             </button>
           </div>
         </div>
         <div className="eq-response">
           {graphMode === "control" ? (
             <EqualizerGraph eqSettings={eqSettings} onBandChange={updateBand} />
+          ) : audioEngine.isNative() ? (
+            <div style={{ height: 160 }}>
+              <AudioVisualizer
+                mode="vu-meter"
+                isPlaying={!audioEngine.isPaused()}
+              />
+            </div>
           ) : (
             <RealtimeSpectrumGraph eqSettings={eqSettings} />
           )}
         </div>
+        <StudioTools settings={eqSettings} onUpdate={onUpdateEQ} />
         <div
           className={`eq-band-section ${eqSettings.enabled ? "" : "bypassed"}`}
         >
