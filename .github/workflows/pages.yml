@@ -1,7 +1,9 @@
 name: Deploy website to GitHub Pages
 on:
   push:
-    branches: [main, arena/671d0e76-music-player]
+    branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
@@ -28,6 +30,7 @@ jobs:
         with:
           path: dist
   deploy:
+    if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-22.04
     permissions:

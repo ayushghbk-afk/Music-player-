@@ -22,12 +22,16 @@ Open port **3000**, or run `PORT=24678 npm run dev` for the current Arena previe
 
 ```sh
 npm run lint       # tsc --noEmit
-npm test           # 9 tests: schema validation, presentation helpers, real WAV metadata
+npm test           # 10 tests: schema validation, presentation helpers, real WAV metadata
 npm run build      # Vite client + dist/server.cjs
 npm start          # production Express server
 ```
 
 `npm run build:android` clears/rebuilds `dist` as a web-only bundle before Capacitor sync. Run `npm run build` again before using `npm start` after an Android sync.
+
+## GitHub Pages
+
+`npm run build:pages` produces a static, project-path-aware site at `/Music-player-/` with scoped offline caching. The Pages workflow deploys from `main`; pull requests build/test without publishing. See [GITHUB_PAGES.md](GITHUB_PAGES.md) for setup, the public URL and companion-server configuration. Local playback and JSON backups need no server; AI and server snapshots do.
 
 ## Implemented
 
@@ -74,9 +78,9 @@ Expected output **after a successful build**:
 
 `android/app/build/outputs/apk/debug/app-debug.apk`
 
-**No APK was generated in this sandbox.** The Gradle invocation stops because Java/JAVA_HOME is absent; Android SDK is also not provisioned and its download hosts are outside the network allowlist. Do not interpret successful Capacitor sync as a successful native build.
+**A debug APK was successfully compiled, linted, and signature-verified in GitHub Actions** ([verified run](https://github.com/ayushghbk-afk/Music-player-/actions/runs/41317759218)). Download the `aether-debug-apk` artifact from that run and extract `app-debug.apk`. The sandbox itself still has no Java/Android SDK, so native compilation runs on GitHub’s provisioned runner, not locally. This is a debug-signed test build, not a production release.
 
-The GitHub Actions workflow installs Node 22, Java 21 and SDK 36, runs lint/tests, builds debug + Android lint, and uploads `aether-debug-apk`. The workflow has been written, not executed in this session.
+The GitHub Actions workflow pins Ubuntu 22.04, Node 22, Java 21 and SDK 36, runs lint/tests, compiles debug + Android lint, verifies the APK signature, and uploads `aether-debug-apk`. It uses the runner’s installed SDK manager rather than the failing third-party SDK bootstrap. API-27-only navigation attributes live in `values-v27`, preserving minSdk 24.
 
 ### Signed release
 
@@ -93,12 +97,12 @@ The keystore is decoded into runner temp storage, removed in an always-run clean
 
 - `npm ci`: passed; audit currently reports **four moderate transitive CLI-tooling advisories** (glob/minimatch/rimraf/Capacitor CLI). No high/critical advisories remained at verification time. Do not use audit's suggested downgrade to Capacitor 4.
 - `npm run lint`: passed.
-- `npm test`: schema sanitization/dedupe/invalid-input tests and real 24-bit WAV encoding and parser-resolution tests passed (five tests total).
+- `npm test`: schema sanitization/dedupe/invalid-input tests and real 24-bit WAV encoding and parser-resolution tests passed (ten tests total, including presentation and deployment helpers).
 - `npm run build` and `npm run build:android`: passed (bundle-size and dependency-comment warnings only).
 - Dev preview HTML with Arena Host header: HTTP 200.
 - Production API: health, JSON 404, denied foreign CORS, invalid payload, 5 MB cap, save/load including EQ, missing-key AI 503 passed.
 - SQLite snapshot survived an actual process restart; expired snapshot returned 404.
-- `./gradlew assembleDebug`: blocked before compilation (missing Java).
+- GitHub Actions `./gradlew assembleDebug lintDebug --no-daemon --stacktrace`: passed, followed by successful `apksigner verify`. Local Gradle remains unavailable without Java.
 - Headless Chromium smoke checks passed after extracting the optional browser package's runtime libraries: demo seeding, advancing playback clock, search, metadata export/restore, reload persistence/dedupe, desktop/mobile render and no 390 px horizontal page overflow. No page exceptions were observed. This verifies browser behavior, not physical audio quality or Android playback.
 
 ## Known limitations / bugs

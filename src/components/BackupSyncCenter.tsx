@@ -257,8 +257,8 @@ export function BackupSyncCenter({
             Save server
           </button>
           <p>
-            Web uses its own origin. Server CORS must allow https://localhost
-            for Android.
+            GitHub Pages and Android use the HTTPS companion server set here.
+            Its CORS allowlist must include this website origin or https://localhost for Android.
           </p>
         </div>
       </details>
