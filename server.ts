@@ -3,6 +3,7 @@ import express from 'express';
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
+import { createServer as createHttpServer } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import rateLimit from 'express-rate-limit';
 import { validateBackup, eqSchema } from './src/services/backupSchema';
@@ -86,15 +87,17 @@ app.all('/api/*', (_req, res) => res.status(404).json({ error: 'API endpoint not
 app.use((error: { status?: number }, _req: express.Request, res: express.Response, _next: express.NextFunction) => res.status(error.status || 500).json({ error: error.status === 413 ? 'Request too large' : 'Invalid request' }));
 
 async function start() {
+  const httpServer = createHttpServer(app);
   if (process.env.NODE_ENV !== 'production') {
     const { createServer } = await import('vite');
-    const vite = await createServer({ server: { middlewareMode: true }, appType: 'spa' });
+    // Share the app listener so Vite's default HMR port (24678) cannot collide.
+    const vite = await createServer({ server: { middlewareMode: true, hmr: { server: httpServer } }, appType: 'spa' });
     app.use(vite.middlewares);
   } else {
     app.use((req, res, next) => /\.(cjs|map)$/.test(req.path) ? res.sendStatus(404) : next());
     app.use(express.static(path.resolve('dist')));
     app.get('*', (req, res) => req.path.includes('.') ? res.sendStatus(404) : res.sendFile(path.resolve('dist/index.html')));
   }
-  app.listen(Number(process.env.PORT || 3000), '0.0.0.0', () => console.log('Aether listening on port ' + (process.env.PORT || 3000)));
+  httpServer.listen(Number(process.env.PORT || 3000), '0.0.0.0', () => console.log('Aether listening on port ' + (process.env.PORT || 3000)));
 }
 start().catch(error => { console.error(error); process.exitCode = 1; });

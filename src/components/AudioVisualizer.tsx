@@ -13,7 +13,7 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
   mode,
   isPlaying,
   className = '',
-  accentColor = '#38bdf8', // Sky Blue default
+  accentColor = '#e5a68c', // Warm studio copper
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animationFrameRef = useRef<number | null>(null);
@@ -51,8 +51,8 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
 
           const gradient = ctx.createLinearGradient(0, height, 0, 0);
           gradient.addColorStop(0, accentColor);
-          gradient.addColorStop(0.7, '#818cf8');
-          gradient.addColorStop(1, '#c084fc');
+          gradient.addColorStop(0.7, '#b88e78');
+          gradient.addColorStop(1, '#ead2b5');
 
           ctx.fillStyle = gradient;
           ctx.beginPath();

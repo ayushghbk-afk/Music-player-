@@ -1,5 +1,5 @@
 const CACHE = 'aether-v2';
-const ASSETS = ['/', '/index.html', '/manifest.json', '/pwa-192.png', '/pwa-512.png', '/apple-touch-icon.png' /* BUILD_ASSETS */];
+const ASSETS = ['/', '/index.html', '/manifest.json', '/pwa-192.png', '/pwa-512.png', '/apple-touch-icon.png', '/aether-mark.svg' /* BUILD_ASSETS */];
 self.addEventListener('install', event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(ASSETS)).then(() => self.skipWaiting())));
 self.addEventListener('activate', event => event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k.startsWith('aether-') && k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())));
 self.addEventListener('fetch', event => {

@@ -2,6 +2,12 @@
 
 Offline-first local music player for Web and Android (`com.aether.audio.player`). React 19, TypeScript 5.8, Tailwind 4/Vite 6, Capacitor 8 and Media3 1.5.1. Dependencies are pinned in `package.json` and `package-lock.json`.
 
+## Studio UI
+
+The redesigned interface uses charcoal surfaces, a theme-aware copper accent, bundled landscape cover artwork, and a responsive library/listening-room layout. Album and artist browsing, favorites, the fullscreen player, ten-band EQ, sound assistant, import, backup, playlists, and metadata editing share the visual system. Imported embedded artwork is retained; demo artwork is a presentation layer and does not rewrite saved tags.
+
+Artwork and application assets are precached in production for offline use. Modal focus management, keyboard-operated EQ ranges, visible focus rings, and reduced-motion support are included. Browser smoke checks covered playback, library controls, secondary screens, and viewport widths 390/768/1280/1536; Android device rendering remains unverified.
+
 ## Run the web app
 
 Requires **Node 22.13+** (SQLite uses `node:sqlite`).
@@ -12,11 +18,11 @@ cp .env.example .env
 npm run dev
 ```
 
-Open port **3000**. The server binds `0.0.0.0` and permits Arena's `.e2b.app` preview hosts. Browser API calls are same-origin; no sandbox-local addresses are used in browser code. Android's import-only loopback server is deliberately device-local.
+Open port **3000**, or run `PORT=24678 npm run dev` for the current Arena preview. Vite HMR shares the application listener to avoid a conflict with its default port 24678. The server binds `0.0.0.0` and permits Arena's `.e2b.app` preview hosts. Browser API calls are same-origin; no sandbox-local addresses are used in browser code. Android's import-only loopback server is deliberately device-local.
 
 ```sh
 npm run lint       # tsc --noEmit
-npm test           # schema validation + real WAV header tests
+npm test           # 9 tests: schema validation, presentation helpers, real WAV metadata
 npm run build      # Vite client + dist/server.cjs
 npm start          # production Express server
 ```
