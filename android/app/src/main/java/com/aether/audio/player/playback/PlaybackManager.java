@@ -310,13 +310,13 @@ public final class PlaybackManager {
     // ---------------------------------------------------------------------
 
     public void playFile(File file, String title, String artist, String album, long startPositionMs) {
-        playUri(Uri.fromFile(file), title, artist, album, startPositionMs);
+        playUri(Uri.fromFile(file), title, artist, album, startPositionMs, "");
     }
 
     public AetherDspProcessor.Meter getMeter() { return dsp.getMeter(); }
     public float getVolume() { return player.getVolume(); }
 
-    public void playUri(final Uri uri, final String title, final String artist, final String album, final long startPositionMs) {
+    public void playUri(final Uri uri, final String title, final String artist, final String album, final long startPositionMs, final String trackId) {
         final long request = ++playRequest;
         runWhenServiceReady(() -> {
             if(request!=playRequest) return;
@@ -335,6 +335,7 @@ public final class PlaybackManager {
                     .setAlbumTitle(album)
                     .build();
             MediaItem item = new MediaItem.Builder()
+                    .setMediaId(trackId)
                     .setUri(uri)
                     .setMediaMetadata(metadata)
                     .build();

@@ -361,7 +361,7 @@ public class MusicPlayerPlugin extends Plugin implements PlaybackManager.Listene
         String artist = call.getString("artist", "Unknown artist");
         String album = call.getString("album", "Aether");
         Double start = call.getDouble("startPosition", 0d);
-        manager.playUri(uri, title, artist, album, (long) (start * 1000));
+        manager.playUri(uri, title, artist, album, (long) (start * 1000), call.getString("trackId", ""));
     }
 
     private JSObject currentState() {

@@ -61,6 +61,7 @@ export interface AetherPlayerPlugin {
   }): Promise<AetherPlayerState>;
   playUrl(options: {
     url: string;
+    trackId?: string;
     title: string;
     artist: string;
     album: string;

@@ -90,6 +90,7 @@ export class AudioEngine {
     source: "native",
   };
   private nativeMeterAt = 0;
+  private nativeUiTickAt = 0;
   private nativeTracks = new Map<string, Track>();
   public isNative() {
     return this.usesNativePlayback();
@@ -234,7 +235,10 @@ export class AudioEngine {
           this.setStatus("paused");
         this.onStateChangeCallback?.(this.nativePlaying);
       } else if (event.type === "time") {
-        this.onTimeUpdateCallback?.(this.nativePosition, this.nativeDuration);
+        if (performance.now() - this.nativeUiTickAt >= 200) {
+          this.nativeUiTickAt = performance.now();
+          this.onTimeUpdateCallback?.(this.nativePosition, this.nativeDuration);
+        }
       } else if (event.type === "ended") {
         this.nativePlaying = false;
         this.onStateChangeCallback?.(false);
@@ -286,7 +290,11 @@ export class AudioEngine {
       (remoteUrl.startsWith("file://") || remoteUrl.startsWith("content://"))
     ) {
       if (generation !== this.loadGeneration) return;
-      await AetherPlayer.playUrl({ url: remoteUrl, ...meta });
+      await AetherPlayer.playUrl({
+        url: remoteUrl,
+        trackId: track.id,
+        ...meta,
+      });
       return;
     }
 
@@ -312,7 +320,7 @@ export class AudioEngine {
     if (generation !== this.loadGeneration) return;
     await AetherPlayer.playStored({ trackId: track.id, ...meta });
     if (generation !== this.loadGeneration) return;
-    this.loadedTrackId = track.id;
+    // Track events, not acceptance of a deferred native command, confirm the loaded ID.
     // Only native isPlaying/READY events may report actual playback.
 
     try {
