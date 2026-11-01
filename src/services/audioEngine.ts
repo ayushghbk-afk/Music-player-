@@ -1,3 +1,4 @@
+import { assetUrl } from "./deployment";
 import { Capacitor } from '@capacitor/core';
 import { Track, EQSettings, PlayerSettings } from '../types';
 import { getTrackBlob } from './db';
@@ -787,7 +788,7 @@ export class AudioEngine {
 
     const artworkUrl = track.coverArt && (track.coverArt.startsWith('http') || track.coverArt.startsWith('data:image'))
       ? track.coverArt
-      : new URL('/pwa-512.png', window.location.href).href;
+      : new URL(assetUrl('pwa-512.png'), window.location.href).href;
     const artworkType = artworkUrl.includes('.png') || artworkUrl.startsWith('data:image/png')
       ? 'image/png'
       : 'image/jpeg';

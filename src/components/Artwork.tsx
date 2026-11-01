@@ -1,18 +1,19 @@
 import React from "react";
 import { Track } from "../types";
+import { assetUrl } from "../services/deployment";
 
 export function artworkFor(track?: Track | null) {
-  if (!track) return "/art/landscape-1.svg";
+  if (!track) return assetUrl("art/landscape-1.svg");
   if (
     track.coverArt?.startsWith("data:image/") ||
     track.coverArt?.startsWith("/")
   )
-    return track.coverArt;
+    return track.coverArt.startsWith("/") ? assetUrl(track.coverArt) : track.coverArt;
   const sample = track.id.match(/^sample-track-([1-5])$/);
   const index = sample
     ? Number(sample[1])
     : ([...track.album].reduce((a, c) => a + c.charCodeAt(0), 0) % 5) + 1;
-  return `/art/landscape-${index}.svg`;
+  return assetUrl(`art/landscape-${index}.svg`);
 }
 export function Artwork({
   track,

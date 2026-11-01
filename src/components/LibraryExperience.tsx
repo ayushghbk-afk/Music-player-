@@ -1,4 +1,5 @@
 import React from "react";
+import { assetUrl } from "../services/deployment";
 import {
   Play,
   ArrowUpRight,
@@ -48,7 +49,7 @@ export function LibraryExperience({
       <section className="feature-banner">
         <img
           className="feature-landscape"
-          src="/art/landscape-1.svg"
+          src={assetUrl("art/landscape-1.svg")}
           alt="Sun setting over layered mountain silhouettes"
         />
         <div className="feature-shade" />

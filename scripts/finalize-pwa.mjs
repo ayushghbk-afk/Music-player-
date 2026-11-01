@@ -1,20 +1,23 @@
-import { readdir, readFile, writeFile } from "node:fs/promises";
-import { createHash } from "node:crypto";
-const assets = (await readdir("dist/assets"))
-  .filter((f) => /\.(js|css)$/.test(f))
-  .map((f) => "/assets/" + f);
-const artwork = (await readdir("dist/art"))
-  .filter((f) => f.endsWith(".svg"))
-  .map((f) => "/art/" + f);
+import { readdir, readFile, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+const pages = process.argv.includes('--pages');
+const base = process.env.AETHER_BASE_PATH || (pages ? '/Music-player-/' : '/');
+if (!/^\/(?:[A-Za-z0-9_.-]+\/)*$/.test(base)) throw new Error('AETHER_BASE_PATH must be an absolute path ending in /');
+const assets = (await readdir('dist/assets')).filter(f => /\.(js|css)$/.test(f)).map(f => 'assets/' + f);
+const artwork = (await readdir('dist/art')).filter(f => f.endsWith('.svg')).map(f => 'art/' + f);
 assets.push(...artwork);
-const hash = createHash("sha256").update(assets.join("\n"));
-for (const file of artwork) hash.update(await readFile("dist" + file));
-const revision = hash.digest("hex").slice(0, 12);
-let worker = await readFile("public/sw.js", "utf8");
-worker = worker
-  .replace("aether-v2", "aether-" + revision)
-  .replace(
-    "/* BUILD_ASSETS */",
-    assets.map((p) => ", " + JSON.stringify(p)).join(""),
-  );
-await writeFile("dist/sw.js", worker);
+const hash = createHash('sha256').update(base).update(assets.join('\n'));
+for (const file of artwork) hash.update(await readFile('dist/' + file));
+const manifest = JSON.parse(await readFile('public/manifest.json', 'utf8'));
+manifest.id = base;
+manifest.scope = base;
+manifest.start_url = base;
+for (const icon of manifest.icons) icon.src = base + icon.src.replace(/^\/+/, '');
+const manifestText = JSON.stringify(manifest, null, 2);
+hash.update(manifestText);
+await writeFile('dist/manifest.json', manifestText + '\n');
+const revision = hash.digest('hex').slice(0, 12);
+let worker = await readFile('public/sw.js', 'utf8');
+worker = worker.replace("'v2'", JSON.stringify(revision)).replace('/* BUILD_ASSETS */', assets.map(p => ', ' + JSON.stringify(p)).join(''));
+await writeFile('dist/sw.js', worker);
+if (pages) await writeFile('dist/.nojekyll', '');

@@ -229,11 +229,11 @@ export function BackupSyncCenter({
       <details className="server-details">
         <summary>
           <Settings2 size={16} /> Companion server settings{" "}
-          <span>Configure Android connection</span>
+          <span>Configure optional connection</span>
         </summary>
         <div>
           <label className="field-label">
-            HTTPS SERVER FOR ANDROID
+            HTTPS COMPANION SERVER
             <input
               value={base}
               placeholder="https://your-aether-server.example"
