@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { defaultStudioRack } from "./studioRack";
 
 const text = (max: number) =>
   z
@@ -26,6 +27,24 @@ const artwork = z
       /^\/(?!\/)[a-zA-Z0-9/_.-]+$/.test(s),
     "Only embedded raster or local artwork is allowed",
   );
+export const studioRackSchema = z.object({
+  enabled: z.boolean(),
+  highPassHz: number(0, 1000).refine((v) => v === 0 || v >= 20),
+  lowPassHz: number(0, 20000).refine((v) => v === 0 || v >= 1000),
+  parametric: z
+    .array(
+      z.object({
+        frequency: number(20, 20000),
+        gain: number(-12, 12),
+        q: number(0.2, 12),
+      }),
+    )
+    .length(3),
+  outputTrimDb: number(-24, 0),
+  delayMs: number(0, 100),
+  invertLeft: z.boolean(),
+  invertRight: z.boolean(),
+});
 export const eqSchema = z.object({
   enabled: z.boolean(),
   preset: text(100),
@@ -38,6 +57,7 @@ export const eqSchema = z.object({
   peakProtection: z.boolean().default(true),
   balance: number(-1, 1).default(0),
   mono: z.boolean().default(false),
+  rack: studioRackSchema.default(defaultStudioRack),
 });
 export const settingsSchema = z.object({
   gapless: z.boolean(),
@@ -49,6 +69,8 @@ export const settingsSchema = z.object({
   resampleRate: z.enum(["native", "96khz", "192khz"]),
   autoPlayNext: z.boolean(),
   autoTheme: z.boolean().default(true),
+  autoThemeSource: z.enum(["song", "artwork"]).default("song"),
+  studioView: z.enum(["simple", "extreme"]).default("simple"),
 });
 export const trackSchema = z.object({
   id,

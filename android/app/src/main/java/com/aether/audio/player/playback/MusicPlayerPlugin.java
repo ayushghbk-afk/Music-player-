@@ -270,13 +270,27 @@ public class MusicPlayerPlugin extends Plugin implements PlaybackManager.Listene
             if (values == null || values.length() != 10) { call.reject("Expected ten EQ bands"); return; }
             double[] bands = new double[10];
             for(int i=0;i<10;i++) bands[i]=Math.max(-12, Math.min(12, values.getDouble(i)));
+            StudioRack rack=StudioRack.disabled();
+            com.getcapacitor.JSObject rackJson=call.getObject("rack");
+            if(rackJson!=null) {
+                org.json.JSONArray peq=rackJson.getJSONArray("parametric");
+                if(peq.length()!=3) throw new IllegalArgumentException("Expected three parametric bands");
+                double[][] parametric=new double[3][3];
+                for(int i=0;i<3;i++) {
+                    org.json.JSONObject band=peq.getJSONObject(i);
+                    parametric[i]=new double[]{band.getDouble("frequency"),band.getDouble("gain"),band.getDouble("q")};
+                }
+                rack=new StudioRack(rackJson.getBoolean("enabled"),rackJson.getDouble("highPassHz"),rackJson.getDouble("lowPassHz"),
+                    parametric,rackJson.getDouble("outputTrimDb"),rackJson.getDouble("delayMs"),
+                    rackJson.getBoolean("invertLeft"),rackJson.getBoolean("invertRight"));
+            }
             manager.applyEQ(call.getBoolean("enabled", true), bands,
                 Math.max(-12,Math.min(12,call.getDouble("preamp", 0d))),
                 Math.max(0,Math.min(100,call.getDouble("bassBoost", 0d))),
                 Math.max(0,Math.min(100,call.getDouble("trebleBoost", 0d))),
                 Math.max(0,Math.min(200,call.getDouble("stereoWidth", 100d))),
                 call.getBoolean("autoHeadroom",true),call.getBoolean("peakProtection",true),
-                Math.max(-1,Math.min(1,call.getDouble("balance",0d))),call.getBoolean("mono",false));
+                Math.max(-1,Math.min(1,call.getDouble("balance",0d))),call.getBoolean("mono",false),rack);
             call.resolve();
         } catch(Exception error) { call.reject("Invalid DSP settings", error); }
     }

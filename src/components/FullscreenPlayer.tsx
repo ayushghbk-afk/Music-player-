@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import {
   Minimize2,
+  Maximize2,
   Play,
   Pause,
   SkipBack,
@@ -19,6 +20,7 @@ import { LyricsView } from "./LyricsView";
 import { audioEngine } from "../services/audioEngine";
 import { AudioVisualizer } from "./AudioVisualizer";
 import { Artwork, displayTitle, timeLabel } from "./Artwork";
+import { useExpandedPlayer } from "./useExpandedPlayer";
 import { useDialogFocus } from "./useDialogFocus";
 interface FullscreenPlayerProps {
   currentTrack: Track | null;
@@ -49,7 +51,10 @@ export function FullscreenPlayer(p: FullscreenPlayerProps) {
   const [tab, setTab] = useState<"visualizer" | "lyrics" | "specs">(
     "visualizer",
   );
-  const ref = useDialogFocus(!!p.currentTrack, p.onClose);
+  const view = useExpandedPlayer(p.onClose);
+  const ref = useDialogFocus(!!p.currentTrack, () =>
+    view.expanded ? view.collapse() : view.close(),
+  );
   if (!p.currentTrack) return null;
   const track = p.currentTrack;
   const progress = p.duration
@@ -57,7 +62,8 @@ export function FullscreenPlayer(p: FullscreenPlayerProps) {
     : 0;
   return (
     <section
-      className="immersive-player"
+      className={`immersive-player ${tab === "lyrics" ? "lyrics-active" : ""} ${view.expanded ? `immersive-expanded expanded-${view.expanded}` : ""}`}
+      data-expanded-view={view.expanded || "none"}
       role="dialog"
       aria-modal="true"
       aria-label="Now playing"
@@ -65,6 +71,21 @@ export function FullscreenPlayer(p: FullscreenPlayerProps) {
     >
       <div className="immersive-ambient" />
       <header className="immersive-header">
+        {view.expanded && (
+          <div className="expanded-track-heading">
+            <strong>{displayTitle(track)}</strong>
+            <span>
+              {view.expanded === "lyrics"
+                ? "Lyrics reader"
+                : audioEngine.isNative()
+                  ? "Native RMS meters"
+                  : p.visualizerMode === "wave"
+                    ? "Oscilloscope"
+                    : "Live visualization"}{" "}
+              · {track.artist}
+            </span>
+          </div>
+        )}
         <span>
           <AudioLines size={22} /> aether
           <span className="eyebrow">THE LISTENING ROOM</span>
@@ -72,7 +93,7 @@ export function FullscreenPlayer(p: FullscreenPlayerProps) {
         <button
           className="icon-button"
           aria-label="Close now playing"
-          onClick={p.onClose}
+          onClick={view.close}
         >
           <Minimize2 size={19} />
         </button>
@@ -95,6 +116,7 @@ export function FullscreenPlayer(p: FullscreenPlayerProps) {
             {(["visualizer", "lyrics", "specs"] as const).map((t) => (
               <button
                 key={t}
+                aria-pressed={tab === t}
                 className={tab === t ? "selected" : ""}
                 onClick={() => setTab(t)}
               >
@@ -109,32 +131,61 @@ export function FullscreenPlayer(p: FullscreenPlayerProps) {
           <div className="immersive-detail">
             {tab === "visualizer" ? (
               <>
-                <label className="visualizer-select">
-                  <span>LIVE ANALYSER</span>
-                  <select
-                    aria-label="Visualization mode"
-                    value={
-                      audioEngine.isNative() ? "vu-meter" : p.visualizerMode
+                <div className="visualizer-toolbar">
+                  <label className="visualizer-select">
+                    <span>LIVE ANALYSER</span>
+                    <select
+                      aria-label="Visualization mode"
+                      value={
+                        audioEngine.isNative() ? "vu-meter" : p.visualizerMode
+                      }
+                      onChange={(e) => {
+                        const mode = e.target.value as VisualizerMode;
+                        p.onChangeVisualizerMode(mode);
+                        if (mode === "wave")
+                          view.expand("visualizer", ref.current);
+                      }}
+                    >
+                      <option value="bars" disabled={audioEngine.isNative()}>
+                        Frequency bars
+                      </option>
+                      <option value="wave" disabled={audioEngine.isNative()}>
+                        Oscilloscope
+                      </option>
+                      <option value="nebula" disabled={audioEngine.isNative()}>
+                        Circular nebula
+                      </option>
+                      <option value="31-band" disabled={audioEngine.isNative()}>
+                        31-band spectrum
+                      </option>
+                      <option value="vu-meter">Analog VU meter</option>
+                    </select>
+                  </label>
+                  <button
+                    className="visualizer-expand"
+                    aria-label={
+                      view.expanded
+                        ? "Exit fullscreen visualization"
+                        : p.visualizerMode === "wave"
+                          ? "Fullscreen oscilloscope"
+                          : "Fullscreen visualization"
                     }
-                    onChange={(e) =>
-                      p.onChangeVisualizerMode(e.target.value as VisualizerMode)
+                    onClick={() =>
+                      view.expanded
+                        ? view.collapse()
+                        : view.expand("visualizer", ref.current)
                     }
                   >
-                    <option value="bars" disabled={audioEngine.isNative()}>
-                      Frequency bars
-                    </option>
-                    <option value="wave" disabled={audioEngine.isNative()}>
-                      Oscilloscope
-                    </option>
-                    <option value="nebula" disabled={audioEngine.isNative()}>
-                      Circular nebula
-                    </option>
-                    <option value="31-band" disabled={audioEngine.isNative()}>
-                      31-band spectrum
-                    </option>
-                    <option value="vu-meter">Analog VU meter</option>
-                  </select>
-                </label>
+                    {view.expanded ? (
+                      <Minimize2 size={16} />
+                    ) : (
+                      <Maximize2 size={16} />
+                    )}
+                    <span>
+                      {view.expanded ? "Back to player" : "Fullscreen"}
+                    </span>
+                  </button>
+                </div>
                 {audioEngine.isNative() && (
                   <small>
                     Native PCM stereo RMS · spectrum modes are browser-only.
@@ -150,9 +201,23 @@ export function FullscreenPlayer(p: FullscreenPlayerProps) {
             ) : tab === "lyrics" ? (
               <LyricsView
                 lyrics={track.lyrics}
+                trackId={track.id}
                 currentTime={p.currentTime}
                 onSeek={p.onSeek}
-                onImport={p.onEditLyrics}
+                onImport={
+                  p.onEditLyrics
+                    ? async () => {
+                        await view.collapse();
+                        p.onEditLyrics?.();
+                      }
+                    : undefined
+                }
+                expanded={view.expanded === "lyrics"}
+                onToggleExpand={() =>
+                  view.expanded
+                    ? view.collapse()
+                    : view.expand("lyrics", ref.current)
+                }
               />
             ) : (
               <dl className="immersive-specs">
@@ -262,7 +327,10 @@ export function FullscreenPlayer(p: FullscreenPlayerProps) {
             <button
               className={`icon-button ${p.eqEnabled ? "control-active" : ""}`}
               aria-label="Studio equalizer"
-              onClick={p.onOpenEQ}
+              onClick={async () => {
+                await view.collapse();
+                p.onOpenEQ();
+              }}
             >
               <SlidersHorizontal size={16} />
             </button>

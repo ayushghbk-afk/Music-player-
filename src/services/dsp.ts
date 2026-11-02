@@ -1,4 +1,5 @@
 import type { EQSettings } from "../types";
+import { defaultStudioRack, rackActive } from "./studioRack";
 
 export const EQ_FREQUENCIES = [
   31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000,
@@ -11,12 +12,13 @@ export function biquad(
   gain: number,
   sampleRate: number,
   shelf?: "low" | "high",
+  q = 1.4,
 ): Coefficients {
   const a = 10 ** (gain / 40),
     w = (2 * Math.PI * Math.min(sampleRate * 0.45, frequency)) / sampleRate;
   const c = Math.cos(w),
     s = Math.sin(w),
-    alpha = s / (2 * 1.4);
+    alpha = s / (2 * q);
   let b0: number, b1: number, b2: number, a0: number, a1: number, a2: number;
   if (!shelf) {
     b0 = 1 + alpha * a;
@@ -45,6 +47,25 @@ export function biquad(
   }
   return [b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0];
 }
+/** RBJ 12 dB/oct Butterworth cuts, with a sample-rate-aware frequency cap. */
+export function cutBiquad(
+  kind: "highpass" | "lowpass",
+  frequency: number,
+  sampleRate: number,
+): Coefficients {
+  const w = (2 * Math.PI * Math.min(sampleRate * 0.45, frequency)) / sampleRate;
+  const c = Math.cos(w),
+    alpha = Math.sin(w) / Math.SQRT2,
+    a0 = 1 + alpha;
+  const b0 = kind === "highpass" ? (1 + c) / 2 : (1 - c) / 2;
+  return [
+    b0 / a0,
+    ((kind === "highpass" ? -2 : 2) * b0) / a0,
+    b0 / a0,
+    (-2 * c) / a0,
+    (1 - alpha) / a0,
+  ];
+}
 export function responseDb(
   coefficients: Coefficients[],
   frequency: number,
@@ -69,6 +90,19 @@ export function eqCoefficients(
     ...EQ_FREQUENCIES.map((f, i) => biquad(f, eq.bands[i] || 0, sampleRate)),
     biquad(100, eq.bassBoost * 0.12, sampleRate, "low"),
     biquad(8000, eq.trebleBoost * 0.12, sampleRate, "high"),
+    ...(rackActive(eq)
+      ? [
+          ...(eq.rack!.highPassHz
+            ? [cutBiquad("highpass", eq.rack!.highPassHz, sampleRate)]
+            : []),
+          ...(eq.rack!.lowPassHz
+            ? [cutBiquad("lowpass", eq.rack!.lowPassHz, sampleRate)]
+            : []),
+          ...eq.rack!.parametric.map((b) =>
+            biquad(b.frequency, b.gain, sampleRate, undefined, b.q),
+          ),
+        ]
+      : []),
   ];
 }
 /** Frequency-response estimate + stereo matrix bound + 1 dB margin; not ReplayGain or true-peak analysis. */
@@ -76,9 +110,17 @@ export function headroomDb(eq: EQSettings, sampleRate = 48000): number {
   if (!eq.enabled || eq.autoHeadroom === false) return 0;
   const coefficients = eqCoefficients(eq, sampleRate);
   let peak = -Infinity;
-  for (let i = 0; i <= 256; i++) {
-    const frequency =
-      10 * (Math.min(22000, sampleRate * 0.49) / 10) ** (i / 256);
+  const probes = [
+    ...Array.from(
+      { length: 257 },
+      (_, i) => 10 * (Math.min(22000, sampleRate * 0.49) / 10) ** (i / 256),
+    ),
+    ...EQ_FREQUENCIES.map((f) => Math.min(f, sampleRate * 0.45)),
+    ...(eq.rack || defaultStudioRack()).parametric.map((b) =>
+      Math.min(b.frequency, sampleRate * 0.45),
+    ),
+  ];
+  for (const frequency of probes) {
     peak = Math.max(peak, responseDb(coefficients, frequency, sampleRate));
   }
   const width = eq.mono ? 1 : Math.max(1, eq.stereoWidth / 100);

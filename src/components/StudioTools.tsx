@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import type { EQSettings } from "../types";
 import { audioEngine } from "../services/audioEngine";
 import { dbfs, headroomDb } from "../services/dsp";
+import { cloneEQ } from "../services/studioRack";
 import { eqSchema } from "../services/backupSchema";
 import { getKV, setKV } from "../services/db";
 
@@ -68,10 +69,7 @@ export function StudioMeters() {
     </div>
   );
 }
-const clone = (settings: EQSettings): EQSettings => ({
-  ...settings,
-  bands: [...settings.bands],
-});
+const clone = cloneEQ;
 export function StudioTools({
   settings,
   onUpdate,

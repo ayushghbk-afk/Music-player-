@@ -12,6 +12,15 @@ import {
 } from "lucide-react";
 import { EQSettings } from "../types";
 import { audioEngine, EQ_FREQUENCIES } from "../services/audioEngine";
+import { StudioRack } from "./StudioRack";
+import { StudioDeck } from "./StudioDeck";
+import { StudioMeters } from "./StudioTools";
+import {
+  defaultStudioRack,
+  rackActive,
+  rackTrim,
+} from "../services/studioRack";
+import type { Track } from "../types";
 import { StudioTools } from "./StudioTools";
 import { AudioVisualizer } from "./AudioVisualizer";
 import { eqCoefficients, responseDb, headroomDb } from "../services/dsp";
@@ -23,6 +32,11 @@ interface EqualizerModalProps {
   eqSettings: EQSettings;
   onUpdateEQ: (settings: EQSettings) => void;
   onClose: () => void;
+  studioView?: "simple" | "extreme";
+  onStudioViewChange?: (view: "simple" | "extreme") => void;
+  currentTrack?: Track | null;
+  playbackRate?: number;
+  onPlaybackRateChange?: (rate: number) => void;
 }
 
 const PRESETS: Record<
@@ -107,7 +121,8 @@ const EqualizerGraph: React.FC<{
     const bandVal = eqSettings.bands[i] || 0;
     const netDb = eqSettings.enabled
       ? responseDb(coefficients, freq, sampleRate) +
-        eqSettings.preamp -
+        eqSettings.preamp +
+        rackTrim(eqSettings) -
         reduction
       : 0;
     const clampedDb = Math.max(-18, Math.min(18, netDb));
@@ -122,7 +137,8 @@ const EqualizerGraph: React.FC<{
       EQ_FREQUENCIES[0] * (EQ_FREQUENCIES[9] / EQ_FREQUENCIES[0]) ** (i / 159);
     const db = eqSettings.enabled
       ? responseDb(coefficients, frequency, sampleRate) +
-        eqSettings.preamp -
+        eqSettings.preamp +
+        rackTrim(eqSettings) -
         reduction
       : 0;
     return `${i ? "L" : "M"} ${paddingX + (i / 159) * graphWidth},${centerY - ((Math.max(-18, Math.min(18, db)) / 18) * graphHeight) / 2}`;
@@ -377,8 +393,15 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
   eqSettings,
   onUpdateEQ,
   onClose,
+  studioView = "simple",
+  onStudioViewChange,
+  currentTrack = null,
+  playbackRate = 1,
+  onPlaybackRateChange,
 }) => {
   const [graphMode, setGraphMode] = useState<"control" | "spectrum">("control");
+  const [confirmReset, setConfirmReset] = useState(false);
+  useEffect(() => setConfirmReset(false), [isOpen]);
   const dialogRef = useDialogFocus(isOpen && !embedded, onClose);
   if (!isOpen) return null;
   const updateBand = (index: number, value: number) => {
@@ -418,7 +441,11 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
             <h2>
               Studio equalizer<span>.</span>
             </h2>
-            <p>A little warmth. A little clarity. Entirely your call.</p>
+            <p>
+              {studioView === "simple"
+                ? "Your sound, without the complexity."
+                : "Precision tools for a single deck and stereo system."}
+            </p>
           </div>
           <div className="eq-heading-actions">
             <button
@@ -441,6 +468,37 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
             )}
           </div>
         </div>
+        <div className="studio-view-bar">
+          <div
+            className="segmented-control"
+            role="group"
+            aria-label="Studio view"
+          >
+            {(["simple", "extreme"] as const).map((view) => (
+              <button
+                key={view}
+                aria-pressed={studioView === view}
+                className={studioView === view ? "selected" : ""}
+                onClick={() => onStudioViewChange?.(view)}
+              >
+                {view === "simple" ? "Simple" : "Extreme"}
+              </button>
+            ))}
+          </div>
+          <span>
+            {studioView === "simple"
+              ? "ESSENTIALS / QUICK TONE"
+              : "EXTREME / PRECISION & PERFORMANCE"}
+          </span>
+        </div>
+        {studioView === "simple" && rackActive(eqSettings) && (
+          <div className="studio-active-notice" role="status">
+            Extreme system rack is active. Switching views does not bypass it.{" "}
+            <button onClick={() => onStudioViewChange?.("extreme")}>
+              Review Extreme
+            </button>
+          </div>
+        )}
         <div className="eq-presets">
           <label className="field-label">
             START WITH A PRESET
@@ -459,7 +517,16 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
           </label>
           <button
             className="text-back"
-            onClick={() =>
+            onClick={() => {
+              if (
+                !confirmReset &&
+                rackActive(eqSettings) &&
+                eqSettings.rack!.outputTrimDb < 0
+              ) {
+                setConfirmReset(true);
+                return;
+              }
+              setConfirmReset(false);
               onUpdateEQ({
                 ...eqSettings,
                 preset: "Flat",
@@ -472,79 +539,137 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
                 mono: false,
                 autoHeadroom: true,
                 peakProtection: true,
-              })
-            }
+                rack: defaultStudioRack(),
+              });
+            }}
           >
-            <RotateCcw size={13} /> Reset to flat
+            <RotateCcw size={13} />{" "}
+            {confirmReset ? "Confirm reset (may get louder)" : "Reset to flat"}
           </button>
-        </div>
-        <div className="eq-graph-header">
-          <span className="eyebrow">
-            {graphMode === "control" ? "ESTIMATED RESPONSE" : "LIVE SIGNAL"}
-          </span>
-          <div className="segmented-control">
+          {confirmReset && (
             <button
-              className={graphMode === "control" ? "selected" : ""}
-              onClick={() => setGraphMode("control")}
+              className="text-back"
+              onClick={() => setConfirmReset(false)}
             >
-              Response
+              Cancel reset
             </button>
-            <button
-              className={graphMode === "spectrum" ? "selected" : ""}
-              onClick={() => setGraphMode("spectrum")}
-            >
-              {audioEngine.isNative() ? "RMS meters" : "Spectrum"}
-            </button>
-          </div>
-        </div>
-        <div className="eq-response">
-          {graphMode === "control" ? (
-            <EqualizerGraph eqSettings={eqSettings} onBandChange={updateBand} />
-          ) : audioEngine.isNative() ? (
-            <div style={{ height: 160 }}>
-              <AudioVisualizer
-                mode="vu-meter"
-                isPlaying={!audioEngine.isPaused()}
-              />
-            </div>
-          ) : (
-            <RealtimeSpectrumGraph eqSettings={eqSettings} />
           )}
         </div>
-        <StudioTools settings={eqSettings} onUpdate={onUpdateEQ} />
-        <div
-          className={`eq-band-section ${eqSettings.enabled ? "" : "bypassed"}`}
-        >
-          <div className="eq-db-scale">
-            <span>+12</span>
-            <span>0 dB</span>
-            <span>−12</span>
-          </div>
-          <div className="eq-bands">
-            {EQ_FREQUENCIES.map((freq, i) => (
-              <label className="eq-band" key={freq}>
-                <output>
-                  {eqSettings.bands[i] > 0 ? "+" : ""}
-                  {eqSettings.bands[i]}
-                </output>
-                <input
-                  type="range"
-                  aria-label={`${freq} Hz gain`}
-                  min={-12}
-                  max={12}
-                  step={0.5}
-                  disabled={!eqSettings.enabled}
-                  value={eqSettings.bands[i]}
-                  onChange={(e) => updateBand(i, Number(e.target.value))}
+        {studioView === "extreme" && (
+          <>
+            <div className="eq-graph-header">
+              <span className="eyebrow">
+                {graphMode === "control" ? "ESTIMATED RESPONSE" : "LIVE SIGNAL"}
+              </span>
+              <div className="segmented-control">
+                <button
+                  className={graphMode === "control" ? "selected" : ""}
+                  onClick={() => setGraphMode("control")}
+                >
+                  Response
+                </button>
+                <button
+                  className={graphMode === "spectrum" ? "selected" : ""}
+                  onClick={() => setGraphMode("spectrum")}
+                >
+                  {audioEngine.isNative() ? "RMS meters" : "Spectrum"}
+                </button>
+              </div>
+            </div>
+            <div className="eq-response">
+              {graphMode === "control" ? (
+                <EqualizerGraph
+                  eqSettings={eqSettings}
+                  onBandChange={updateBand}
                 />
-                <span>
-                  {freq >= 1000 ? `${freq / 1000}k` : freq}
-                  <small>Hz</small>
-                </span>
+              ) : audioEngine.isNative() ? (
+                <div style={{ height: 160 }}>
+                  <AudioVisualizer
+                    mode="vu-meter"
+                    isPlaying={!audioEngine.isPaused()}
+                  />
+                </div>
+              ) : (
+                <RealtimeSpectrumGraph eqSettings={eqSettings} />
+              )}
+            </div>
+            <StudioTools settings={eqSettings} onUpdate={onUpdateEQ} />
+            {onPlaybackRateChange && (
+              <StudioDeck
+                track={currentTrack}
+                rate={playbackRate}
+                onRateChange={onPlaybackRateChange}
+              />
+            )}
+            <StudioRack settings={eqSettings} onUpdate={onUpdateEQ} />
+            <div
+              className={`eq-band-section ${eqSettings.enabled ? "" : "bypassed"}`}
+            >
+              <div className="eq-db-scale">
+                <span>+12</span>
+                <span>0 dB</span>
+                <span>−12</span>
+              </div>
+              <div className="eq-bands">
+                {EQ_FREQUENCIES.map((freq, i) => (
+                  <label className="eq-band" key={freq}>
+                    <output>
+                      {eqSettings.bands[i] > 0 ? "+" : ""}
+                      {eqSettings.bands[i]}
+                    </output>
+                    <input
+                      type="range"
+                      aria-label={`${freq} Hz gain`}
+                      min={-12}
+                      max={12}
+                      step={0.5}
+                      disabled={!eqSettings.enabled}
+                      value={eqSettings.bands[i]}
+                      onChange={(e) => updateBand(i, Number(e.target.value))}
+                    />
+                    <span>
+                      {freq >= 1000 ? `${freq / 1000}k` : freq}
+                      <small>Hz</small>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+        {studioView === "simple" && (
+          <>
+            <StudioMeters />
+            <div className="studio-simple-safety">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={eqSettings.autoHeadroom !== false}
+                  onChange={(e) =>
+                    onUpdateEQ({
+                      ...eqSettings,
+                      autoHeadroom: e.target.checked,
+                    })
+                  }
+                />
+                Auto headroom
               </label>
-            ))}
-          </div>
-        </div>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={eqSettings.peakProtection !== false}
+                  onChange={(e) =>
+                    onUpdateEQ({
+                      ...eqSettings,
+                      peakProtection: e.target.checked,
+                    })
+                  }
+                />
+                Peak protection
+              </label>
+            </div>
+          </>
+        )}
         <div className="eq-effects">
           {(
             [

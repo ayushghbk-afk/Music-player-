@@ -74,4 +74,44 @@ public class AetherDspProcessorTest {
         AetherDspProcessor p=processor(); p.queueInput(tone(2048,0.5,0.5,0)); p.getOutput();
         assertTrue(p.getMeter().peak>0); p.flush(); assertEquals(0,p.getMeter().peak,0);
     }
+
+    @Test public void systemTrimAndPolarityAffectNativeSamplesAndBypassIsNeutral() throws Exception {
+        AetherDspProcessor p=processor();
+        StudioRack rack=new StudioRack(true,0,0,new double[][]{{120,0,1.4},{1000,0,1.4},{8000,0,1.4}},-6,0,true,false);
+        p.update(true,new double[10],0,0,0,100,false,false,0,false,rack);
+        for(int i=0;i<8;i++) { p.queueInput(tone(1024,0.4,0.4,i*1024)); p.getOutput(); }
+        assertTrue(p.getMeter().left>0.13 && p.getMeter().left<0.15);
+        p.queueInput(tone(1024,0.4,0.4,8192)); ByteBuffer out=p.getOutput().order(ByteOrder.nativeOrder());
+        while(out.hasRemaining()) assertEquals(-out.getShort(),out.getShort(),1);
+        p.update(false,new double[10],0,0,0,100,false,false,0,false,rack);
+        for(int i=0;i<8;i++) { p.queueInput(tone(1024,0.4,0.4,i*1024)); p.getOutput(); }
+        assertTrue(p.getMeter().left>0.27);
+    }
+    @Test public void systemDelayUsesSampleAccurateTapAndFlushClearsHistory() throws Exception {
+        AetherDspProcessor p=processor();
+        StudioRack rack=new StudioRack(true,0,0,new double[][]{{120,0,1.4},{1000,0,1.4},{8000,0,1.4}},0,10,false,false);
+        p.update(true,new double[10],0,0,0,100,false,false,0,false,rack);
+        // Settle the initial fade with silence, then inspect an impulse.
+        p.queueInput(tone(2048,0,0,0)); p.getOutput();
+        ByteBuffer impulse=ByteBuffer.allocateDirect(4096).order(ByteOrder.nativeOrder());
+        impulse.putShort((short)10000).putShort((short)10000);
+        while(impulse.hasRemaining()) impulse.putShort((short)0);
+        impulse.flip(); p.queueInput(impulse); ByteBuffer out=p.getOutput().order(ByteOrder.nativeOrder());
+        for(int i=0;i<1024;i++) { int left=out.getShort(), right=out.getShort(); assertEquals(i==480 ? 10000 : 0,left); assertEquals(left,right); }
+        p.flush(); p.queueInput(tone(2048,0,0,0)); p.getOutput(); assertEquals(0,p.getMeter().peak,0);
+    }
+    @Test public void nativeSweepAndParametricRackReallyFilterAudio() throws Exception {
+        AetherDspProcessor p=processor();
+        double[][] neutral={{120,0,1.4},{1000,0,1.4},{8000,0,1.4}};
+        p.update(true,new double[10],0,0,0,100,false,false,0,false,new StudioRack(true,1000,0,neutral,0,0,false,false));
+        for(int i=0;i<12;i++) { p.queueInput(tone(1024,0.4,0.4,i*1024)); p.getOutput(); }
+        assertTrue(p.getMeter().left<0.02);
+        double[][] notch={{220,-12,4},{1000,0,1.4},{8000,0,1.4}};
+        p.update(true,new double[10],0,0,0,100,false,false,0,false,new StudioRack(true,0,0,notch,0,0,false,false));
+        for(int i=0;i<16;i++) { p.queueInput(tone(1024,0.4,0.4,i*1024)); p.getOutput(); }
+        assertTrue(p.getMeter().left>0.06 && p.getMeter().left<0.08);
+    }
+    @Test(expected=IllegalArgumentException.class) public void nativeRackRejectsNonFiniteSettings() {
+        new StudioRack(true,0,0,new double[][]{{120,0,1.4},{1000,0,1.4},{8000,0,1.4}},0,Double.NaN,false,false);
+    }
 }

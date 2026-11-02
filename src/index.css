@@ -4451,3 +4451,48 @@ select option {
   color: var(--muted);
   font-size: 9px;
 }
+
+/* Typed color transitions keep sound-driven palettes gradual, not beat flashes. */
+@property --accent {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #e5a68c;
+}
+@property --music-tint {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+.aether-app {
+  transition:
+    --accent 1.8s ease,
+    --music-tint 2.4s ease;
+}
+.song-theme-select {
+  display: grid;
+  gap: 8px;
+  font-size: 12px;
+}
+.song-theme-select select {
+  width: 100%;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #ffffff1a;
+  border-radius: 8px;
+  background: #202124;
+  color: #eee;
+}
+.song-theme-status {
+  color: var(--accent);
+  font-size: 11px;
+  text-transform: capitalize;
+  line-height: 1.7;
+}
+@media (prefers-reduced-motion: reduce) {
+  .aether-app {
+    transition: none;
+  }
+}
+.playback-settings > .song-theme-status {
+  color: var(--accent);
+}
