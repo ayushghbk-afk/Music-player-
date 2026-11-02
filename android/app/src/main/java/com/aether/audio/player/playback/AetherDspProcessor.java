@@ -32,18 +32,28 @@ public final class AetherDspProcessor extends BaseAudioProcessor {
         final boolean enabled, headroom, protection, mono;
         final double[] bands;
         final double preamp, bass, treble, width, balance;
+        final StudioRack rack;
         Settings(boolean enabled, double[] bands, double preamp, double bass, double treble, double width,
                  boolean headroom, boolean protection, double balance, boolean mono) {
+            this(enabled,bands,preamp,bass,treble,width,headroom,protection,balance,mono,StudioRack.disabled());
+        }
+        Settings(boolean enabled, double[] bands, double preamp, double bass, double treble, double width,
+                 boolean headroom, boolean protection, double balance, boolean mono, StudioRack rack) {
+            this.rack=rack;
             this.enabled=enabled; this.bands=bands.clone(); this.preamp=preamp; this.bass=bass; this.treble=treble; this.width=width;
             this.headroom=headroom; this.protection=protection; this.balance=balance; this.mono=mono;
         }
         boolean same(Settings s) {
-            return enabled==s.enabled && Arrays.equals(bands,s.bands) && preamp==s.preamp && bass==s.bass && treble==s.treble && width==s.width && headroom==s.headroom && protection==s.protection && balance==s.balance && mono==s.mono;
+            return enabled==s.enabled && Arrays.equals(bands,s.bands) && preamp==s.preamp && bass==s.bass && treble==s.treble && width==s.width && headroom==s.headroom && protection==s.protection && balance==s.balance && mono==s.mono && rack.same(s.rack);
         }
     }
     public void update(boolean enabled, double[] bands, double preamp, double bass, double treble, double width,
                        boolean headroom, boolean protection, double balance, boolean mono) {
-        Settings next = new Settings(enabled,bands,preamp,bass,treble,width,headroom,protection,balance,mono);
+        update(enabled,bands,preamp,bass,treble,width,headroom,protection,balance,mono,StudioRack.disabled());
+    }
+    public void update(boolean enabled, double[] bands, double preamp, double bass, double treble, double width,
+                       boolean headroom, boolean protection, double balance, boolean mono, StudioRack rack) {
+        Settings next = new Settings(enabled,bands,preamp,bass,treble,width,headroom,protection,balance,mono,rack);
         if (!requested.same(next)) requested=next;
     }
     @Override protected AudioFormat onConfigure(AudioFormat input) throws AudioProcessor.UnhandledAudioFormatException {
@@ -55,11 +65,22 @@ public final class AetherDspProcessor extends BaseAudioProcessor {
     }
     private final class Bank {
         final Settings settings;
-        final double[][] coefficients = new double[12][5];
-        final double[][][] state = new double[channels][12][2];
-        final double gain;
-        Bank(Settings settings) {
+        final double[][] coefficients = new double[17][5];
+        final double[][][] state = new double[channels][17][2];
+        final double gain, trim;
+        final double[][] delay;
+        final int delayFrames;
+        int write;
+        Bank(Settings settings, Bank prior) {
             this.settings=settings;
+            boolean rackActive=settings.enabled && settings.rack.enabled;
+            trim=rackActive ? Math.pow(10,settings.rack.outputTrimDb/20) : 1;
+            delayFrames=rackActive ? (int)Math.round(sampleRate*settings.rack.delayMs/1000) : 0;
+            delay=new double[channels][(int)Math.ceil(sampleRate*0.1)+1];
+            if(prior!=null) {
+                write=prior.write;
+                for(int ch=0;ch<channels;ch++) System.arraycopy(prior.delay[ch],0,delay[ch],0,delay[ch].length);
+            }
         for (int i=0;i<12;i++) {
             double gain = i<10 ? settings.bands[i] : (i==10 ? settings.bass : settings.treble)*0.12;
             double frequency = Math.min(sampleRate*0.45, i<10 ? FREQUENCIES[i] : i==10 ? 100 : 8000);
@@ -80,10 +101,14 @@ public final class AetherDspProcessor extends BaseAudioProcessor {
             coefficients[i]=new double[]{b0/a0,b1/a0,b2/a0,a1/a0,a2/a0};
         }
 
+            double[][] rackCoefficients=settings.rack.coefficients(sampleRate);
+            for(int i=0;i<5;i++) coefficients[12+i]=rackCoefficients[i];
+
             double maximum=-200;
             if (settings.enabled && settings.headroom) {
-                for(int k=0;k<=256;k++) {
-                    double f=10*Math.pow(Math.min(22000,sampleRate*0.49)/10.0,k/256.0);
+                for(int k=0;k<=269;k++) {
+                    double f=k<=256 ? 10*Math.pow(Math.min(22000,sampleRate*0.49)/10.0,k/256.0) :
+                        Math.min(sampleRate*0.45,k<267 ? FREQUENCIES[k-257] : settings.rack.parametric[k-267][0]);
                     double w=2*Math.PI*f/sampleRate, c=Math.cos(w), s=Math.sin(w), c2=Math.cos(2*w), s2=Math.sin(2*w), db=0;
                     for(double[] b:coefficients) {
                         double nr=b[0]+b[1]*c+b[2]*c2, ni=b[1]*s+b[2]*s2;
@@ -102,7 +127,7 @@ public final class AetherDspProcessor extends BaseAudioProcessor {
                 double x=input[ch];
                 if(settings.enabled) {
                     x*=gain;
-                    for(int i=0;i<12;i++) {
+                    for(int i=0;i<coefficients.length;i++) {
                         double[] b=coefficients[i], z=state[ch][i];
                         double y=b[0]*x+z[0]; z[0]=b[1]*x-b[3]*y+z[1]; z[1]=b[2]*x-b[4]*y;
                         // Flush inaudible denormals to keep long quiet tails inexpensive.
@@ -119,13 +144,21 @@ public final class AetherDspProcessor extends BaseAudioProcessor {
                 output[0]=(mid+side)*Math.min(1,1-settings.balance);
                 output[1]=(mid-side)*Math.min(1,1+settings.balance);
             }
+            int read=(write-delayFrames+delay[0].length)%delay[0].length;
+            for(int ch=0;ch<channels;ch++) {
+                boolean invert=settings.enabled && settings.rack.enabled &&
+                    (ch==0 ? settings.rack.invertLeft : ch==1 && settings.rack.invertRight);
+                delay[ch][write]=output[ch]*trim*(invert ? -1 : 1);
+                output[ch]=delay[ch][read];
+            }
+            write=(write+1)%delay[0].length;
         }
     }
     @Override public void queueInput(ByteBuffer input) {
         Settings settings=requested;
         if(applied!=settings && (current==null || fadeRemaining==0)) {
             // Keep the old delay state alive during the transition, instead of zeroing it mid-wave.
-            previous=current; current=new Bank(settings); applied=settings;
+            previous=current; current=new Bank(settings,current); applied=settings;
             fadeLength=Math.max(1,sampleRate/50); fadeRemaining=fadeLength;
         }
         settings=applied;

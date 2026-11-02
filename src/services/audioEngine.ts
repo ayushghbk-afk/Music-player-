@@ -1,3 +1,5 @@
+import { extractSongFeatures, type SongFeatures } from "./songTheme";
+import { defaultStudioRack, rackActive } from "./studioRack";
 import { assetUrl } from "./deployment";
 import { Capacitor } from "@capacitor/core";
 import { Track, EQSettings, PlayerSettings } from "../types";
@@ -56,6 +58,10 @@ export class AudioEngine {
   private audioCtx: AudioContext | null = null;
   private sourceNode: MediaElementAudioSourceNode | null = null;
   private analyserNode: AnalyserNode | null = null;
+  private songAnalyser: AnalyserNode | null = null;
+  private songSpectrum = new Float32Array(1024);
+  private songWaveform = new Float32Array(2048);
+  private previousSongSpectrum = new Float32Array(1024);
   private preampGainNode: GainNode | null = null;
   private eqFilters: BiquadFilterNode[] = [];
   private bassFilter: BiquadFilterNode | null = null;
@@ -81,6 +87,10 @@ export class AudioEngine {
   private outputCeiling: WaveShaperNode | null = null;
   private ceilingCurve: Float32Array | null = null;
   private balanceGains: GainNode[] = [];
+  private rackFilters: BiquadFilterNode[] = [];
+  private rackDry: GainNode | null = null;
+  private rackWet: GainNode | null = null;
+  private outputDelay: DelayNode | null = null;
   private switchGain: GainNode | null = null;
   private nativeMeter: MeterLevels = {
     left: 0,
@@ -623,6 +633,12 @@ export class AudioEngine {
       this.switchGain.channelCountMode = "explicit";
       this.switchGain.channelInterpretation = "speakers";
 
+      // Read-only analysis tap before EQ/volume. It neither decodes another file
+      // nor routes another audible output, so analysis cannot change the sound.
+      this.songAnalyser = this.audioCtx.createAnalyser();
+      this.songAnalyser.fftSize = 2048;
+      this.songAnalyser.smoothingTimeConstant = 0.25;
+      this.sourceNode.connect(this.songAnalyser);
       this.sourceNode.connect(this.switchGain);
       let lastNode: AudioNode = this.switchGain;
       lastNode.connect(this.preampGainNode);
@@ -638,6 +654,29 @@ export class AudioEngine {
 
       lastNode.connect(this.trebleFilter);
       lastNode = this.trebleFilter;
+
+      // Parallel dry/wet rack avoids pretending that an "off" high/low cut is neutral.
+      const rackMerge = this.audioCtx.createGain();
+      this.rackDry = this.audioCtx.createGain();
+      this.rackWet = this.audioCtx.createGain();
+      this.rackDry.gain.value = 1;
+      this.rackWet.gain.value = 0;
+      lastNode.connect(this.rackDry).connect(rackMerge);
+      this.rackFilters = [
+        "highpass",
+        "lowpass",
+        "peaking",
+        "peaking",
+        "peaking",
+      ].map((type) => {
+        const filter = this.audioCtx!.createBiquadFilter();
+        filter.type = type as BiquadFilterType;
+        lastNode.connect(filter);
+        lastNode = filter;
+        return filter;
+      });
+      lastNode.connect(this.rackWet).connect(rackMerge);
+      lastNode = rackMerge;
 
       const splitter = this.audioCtx.createChannelSplitter(2);
       splitter.channelCount = 2;
@@ -663,7 +702,9 @@ export class AudioEngine {
         return gain;
       });
       const guardSplitter = this.audioCtx.createChannelSplitter(2);
-      balanceMerger.connect(guardSplitter);
+      this.outputDelay = this.audioCtx.createDelay(0.1);
+      balanceMerger.connect(this.outputDelay);
+      this.outputDelay.connect(guardSplitter);
       this.guardAnalysers = [0, 1].map((channel) => {
         const analyser = this.audioCtx!.createAnalyser();
         analyser.fftSize = 1024;
@@ -673,7 +714,7 @@ export class AudioEngine {
       this.protection = this.audioCtx.createWaveShaper();
       this.protectionEnabled = undefined;
       this.protection.oversample = "2x";
-      balanceMerger.connect(this.protection);
+      this.outputDelay.connect(this.protection);
       this.outputCeiling = this.audioCtx.createWaveShaper();
       this.outputCeiling.oversample = "none";
       this.protection.connect(this.outputCeiling);
@@ -814,6 +855,7 @@ export class AudioEngine {
       if (callbacks.onError) this.onErrorCallback = callbacks.onError;
     }
     const generation = ++this.loadGeneration;
+    this.previousSongSpectrum.fill(0);
     const position = this.startPosition;
     this.startPosition = 0;
     this.currentTrack = track;
@@ -971,7 +1013,9 @@ export class AudioEngine {
   public seek(seconds: number) {
     if (this.usesNativePlayback()) {
       this.nativePosition = seconds;
-      AetherPlayer.seek({ seconds }).catch(() => {});
+      AetherPlayer.seek({ seconds }).catch((error) =>
+        this.fail("Native seek failed: " + error.message),
+      );
       return;
     }
     const audio = this.audioElement;
@@ -1006,10 +1050,34 @@ export class AudioEngine {
   public setPlaybackRate(rate: number) {
     this.playbackRate = Math.max(0.5, Math.min(3, rate));
     if (this.usesNativePlayback()) {
-      AetherPlayer.setPlaybackRate({ rate }).catch(() => {});
+      AetherPlayer.setPlaybackRate({ rate: this.playbackRate }).catch((error) =>
+        this.fail("Native speed change failed: " + error.message),
+      );
       return;
     }
-    if (this.audioElement) this.audioElement.playbackRate = rate;
+    if (this.audioElement) this.audioElement.playbackRate = this.playbackRate;
+  }
+
+  /** Available only for the current browser decoder. Native never falls back to WebView audio. */
+  public readSongFeatures(trackId: string): SongFeatures | null {
+    if (
+      this.usesNativePlayback() ||
+      !this.songAnalyser ||
+      !this.audioCtx ||
+      this.audioCtx.state !== "running" ||
+      this.isPaused() ||
+      this.loadedTrackId !== trackId ||
+      this.status !== "playing"
+    )
+      return null;
+    this.songAnalyser.getFloatFrequencyData(this.songSpectrum);
+    this.songAnalyser.getFloatTimeDomainData(this.songWaveform);
+    return extractSongFeatures(
+      this.songSpectrum,
+      this.songWaveform,
+      this.audioCtx.sampleRate,
+      this.previousSongSpectrum,
+    );
   }
 
   public getAnalyserData(
@@ -1105,11 +1173,47 @@ export class AudioEngine {
       const width = eq.enabled ? (eq.mono ? 0 : eq.stereoWidth / 100) : 1;
       smooth(gain.gain, (i === 0 || i === 3 ? 1 + width : 1 - width) / 2);
     });
+    const rack = eq.rack || defaultStudioRack();
+    const activeRack = rackActive(eq);
+    if (this.rackDry) smooth(this.rackDry.gain, activeRack ? 0 : 1);
+    if (this.rackWet) smooth(this.rackWet.gain, activeRack ? 1 : 0);
+    this.rackFilters.forEach((filter, i) => {
+      if (i < 2) {
+        const frequency = i === 0 ? rack.highPassHz : rack.lowPassHz;
+        // A zero-gain peaking filter is exactly unity; do not substitute an allpass
+        // (which changes phase and can cancel during the wet/dry transition).
+        filter.type = frequency
+          ? i === 0
+            ? "highpass"
+            : "lowpass"
+          : "peaking";
+        smooth(
+          filter.frequency,
+          Math.min(frequency || 1000, this.audioCtx!.sampleRate * 0.45),
+        );
+        smooth(filter.Q, frequency ? Math.SQRT1_2 : 1.4);
+        smooth(filter.gain, 0);
+      } else {
+        const band = rack.parametric[i - 2];
+        smooth(
+          filter.frequency,
+          Math.min(band.frequency, this.audioCtx!.sampleRate * 0.45),
+        );
+        smooth(filter.gain, band.gain);
+        smooth(filter.Q, band.q);
+      }
+    });
+    if (this.outputDelay)
+      smooth(this.outputDelay.delayTime, activeRack ? rack.delayMs / 1000 : 0);
     this.balanceGains.forEach((gain, channel) => {
       const balance = eq.enabled ? eq.balance || 0 : 0;
       smooth(
         gain.gain,
-        channel === 0 ? Math.min(1, 1 - balance) : Math.min(1, 1 + balance),
+        (channel === 0 ? Math.min(1, 1 - balance) : Math.min(1, 1 + balance)) *
+          (activeRack
+            ? 10 ** (rack.outputTrimDb / 20) *
+              ((channel === 0 ? rack.invertLeft : rack.invertRight) ? -1 : 1)
+            : 1),
       );
     });
     this.eqFilters.forEach((filter, idx) =>

@@ -42,6 +42,16 @@ export interface Playlist {
   color?: string;
 }
 
+export interface StudioRackSettings {
+  enabled: boolean;
+  highPassHz: number; // 0 = bypass, otherwise 20–1000 Hz, 12 dB/oct Butterworth
+  lowPassHz: number; // 0 = bypass, otherwise 1000–20000 Hz, 12 dB/oct Butterworth
+  parametric: { frequency: number; gain: number; q: number }[]; // exactly three bells
+  outputTrimDb: number; // -24 to 0 dB; attenuation only
+  delayMs: number; // 0–100 ms, common stereo delay
+  invertLeft: boolean;
+  invertRight: boolean;
+}
 export interface EQSettings {
   enabled: boolean;
   preset: string;
@@ -54,6 +64,7 @@ export interface EQSettings {
   peakProtection?: boolean;
   balance?: number; // -1 left, +1 right
   mono?: boolean;
+  rack?: StudioRackSettings;
 }
 
 export type ThemeOption =
@@ -79,6 +90,8 @@ export interface PlayerSettings {
   resampleRate: "native" | "96khz" | "192khz";
   autoPlayNext: boolean;
   autoTheme?: boolean;
+  autoThemeSource?: "song" | "artwork";
+  studioView?: "simple" | "extreme";
 }
 
 export interface BackupPayload {

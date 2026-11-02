@@ -37,7 +37,7 @@ import {
   generateSynthesizedTrackBlob,
 } from "./services/sampleLibrary";
 import { audioEngine, type PlaybackStatus } from "./services/audioEngine";
-import { useArtworkTheme } from "./services/artworkTheme";
+import { useSongTheme } from "./services/useSongTheme";
 import { eqSchema, settingsSchema } from "./services/backupSchema";
 
 import { Sidebar, NavView } from "./components/Sidebar";
@@ -82,6 +82,8 @@ const DEFAULT_SETTINGS: PlayerSettings = {
   resampleRate: "native",
   autoPlayNext: true,
   autoTheme: true,
+  autoThemeSource: "song",
+  studioView: "simple",
 };
 
 const revokeTrackAudioUrls = (trackList: Track[]) => {
@@ -171,9 +173,11 @@ export default function App() {
   const [libraryLoading, setLibraryLoading] = useState(true);
   const preferencesLoaded = useRef(false);
   const durationSaved = useRef(new Map<string, number>());
-  const artworkTheme = useArtworkTheme(
+  const songTheme = useSongTheme(
     currentTrack,
     playerSettings.autoTheme !== false,
+    playerSettings.autoThemeSource || "song",
+    isPlaying,
   );
   const currentTrackRef = useRef<Track | null>(null);
   currentTrackRef.current = currentTrack;
@@ -284,6 +288,23 @@ export default function App() {
       window.removeEventListener("touchstart", claimFocus);
     };
   }, []);
+
+  const studioProps = {
+    studioView: playerSettings.studioView || ("simple" as const),
+    onStudioViewChange: (studioView: "simple" | "extreme") => {
+      const updated = { ...playerSettings, studioView };
+      setPlayerSettings(updated);
+      void setKV("playerSettings", updated);
+    },
+    currentTrack,
+    playbackRate: playerSettings.playbackRate,
+    onPlaybackRateChange: (playbackRate: number) => {
+      const updated = { ...playerSettings, playbackRate };
+      setPlayerSettings(updated);
+      audioEngine.setPlaybackRate(playbackRate);
+      void setKV("playerSettings", updated);
+    },
+  };
 
   // Load or Seed Library
   const loadLibrary = useCallback(async () => {
@@ -645,7 +666,9 @@ export default function App() {
   return (
     <div
       className={`aether-app theme-${theme} ${playerSettings.autoTheme !== false ? "artwork-theme" : ""}`}
-      style={artworkTheme}
+      style={songTheme.style}
+      data-song-character={songTheme.character}
+      data-theme-source={songTheme.source}
     >
       {(libraryLoading ||
         playbackStatus === "loading" ||
@@ -712,11 +735,42 @@ export default function App() {
                   void setKV("playerSettings", updated);
                 }}
               />{" "}
-              Follow album artwork colors
+              Automatic music theme
             </label>
+            {playerSettings.autoTheme !== false && (
+              <>
+                <label className="song-theme-select">
+                  Theme analysis
+                  <select
+                    aria-label="Automatic theme source"
+                    value={playerSettings.autoThemeSource || "song"}
+                    onChange={(event) => {
+                      const updated = {
+                        ...playerSettings,
+                        autoThemeSource: event.target.value as
+                          | "song"
+                          | "artwork",
+                      };
+                      setPlayerSettings(updated);
+                      void setKV("playerSettings", updated);
+                    }}
+                  >
+                    <option value="song">Song sound + artwork</option>
+                    <option value="artwork">Artwork colors only</option>
+                  </select>
+                </label>
+                <p className="song-theme-status" role="status">
+                  {songTheme.source === "audio"
+                    ? `${songTheme.character} · ${isPlaying ? "live sound analysis" : "last analyzed sound"}`
+                    : songTheme.source === "artwork"
+                      ? "Following album artwork"
+                      : `${songTheme.character} · ${audioEngine.isNative() ? "genre/artwork fallback on Android" : isPlaying ? "genre/artwork fallback · listening for a stable sound…" : "genre/artwork fallback · play to analyze"}`}
+                </p>
+              </>
+            )}
             <p className="text-xs text-zinc-400">
-              Music-matched background, highlights and Analog VU. Choosing a
-              manual theme turns this off.
+              Estimates bass, brightness, energy and sound changes—not emotions
+              or lyrics. Colors settle gradually; manual themes turn this off.
             </p>
             <label className="block">
               Speed{" "}
@@ -968,6 +1022,7 @@ export default function App() {
               {currentView === "equalizer" && (
                 <div className="py-4">
                   <EqualizerModal
+                    {...studioProps}
                     isOpen={true}
                     embedded
                     eqSettings={eqSettings}
@@ -1129,6 +1184,7 @@ export default function App() {
 
       {/* Equalizer Modal Popup */}
       <EqualizerModal
+        {...studioProps}
         isOpen={isEQModalOpen}
         eqSettings={eqSettings}
         onUpdateEQ={(eq) => {

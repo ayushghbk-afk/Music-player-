@@ -8,6 +8,12 @@ The redesigned interface uses charcoal surfaces, a theme-aware copper accent, bu
 
 Artwork and application assets are precached in production for offline use. Modal focus management, keyboard-operated EQ ranges, visible focus rings, and reduced-motion support are included. Browser smoke checks covered playback, library controls, secondary screens, and viewport widths 390/768/1280/1536; Android device rendering remains unverified.
 
+### Simple and Extreme Studio
+
+Studio now offers two saved views. **Simple** keeps presets, basic tone/width controls, meters and protection. **Extreme** adds the ten-band EQ/response display, A/B and custom presets, single-deck cue/speed/tap-BPM tools, and a bypassable system rack with three frequency/gain/Q parametric bands, high/low cuts, attenuation, polarity and common stereo delay. Switching views never resets DSP; Simple warns when the advanced rack is still active.
+
+These are software stereo tools, not a two-deck DJ mixer or certified speaker-management system. The current browser implementation is tested; updated native Android DSP source/tests still require Gradle/device verification. See [STUDIO_MODES_REPORT.md](STUDIO_MODES_REPORT.md) for ranges, workflow, verification, assumptions and the required one-positive/five-risk reports.
+
 ### Dedicated phone layout
 
 The phone UI has five primary tabs and a focus-managed More sheet for hi-res tracks, the assistant, backup/sync, playback preferences and all five appearance themes. Header search opens and focuses library search. The home screen has phone-specific typography and collection shortcuts, and the mini-player only appears once a track is selected. Player, library, import and EQ controls use larger mobile touch targets. Safe-area padding, narrow screens, landscape layouts and Android back dismissal are handled separately from desktop styles in `src/mobile.css`.
@@ -134,8 +140,22 @@ Roadmap: LRC synchronization, sleep timer, queue editor, Android Auto, smart pla
 
 ### Audio stability, artwork colors and studio monitoring
 
-This update guards rapid track changes, smooths DSP changes, adds real stereo RMS Analog VU metering on web **and native Android**, and defaults to safe headroom/peak protection. In **Playback settings**, “Follow album artwork colors” links the room background and meters to the displayed cover; choosing a manual theme turns it off.
+This update guards rapid track changes, smooths DSP changes, adds real stereo RMS Analog VU metering on web **and native Android**, and defaults to safe headroom/peak protection. In **Playback settings**, “Automatic music theme” links the room background and meters to music colors (choose “Artwork colors only” for the original cover-based behavior); choosing a manual theme turns it off.
 
 Import `.lrc` / `.txt` from a track’s tag editor, or import uniquely matching-name sidecars alongside your audio. In Now Playing → Lyrics, timestamped lines follow playback and can be tapped to seek. The studio adds mono/balance, A/B snapshots, measured levels, device-local custom presets and validated EQ JSON import/export. Loading now distinguishes file preparation, buffering and actual playback.
 
 See [AUDIO_UPGRADE_REPORT.md](AUDIO_UPGRADE_REPORT.md) for precise capabilities, limitations, validation and APK instructions. Native spectrum modes are deliberately not simulated; Android uses measured RMS VU. Peak protection is not a transparent true-peak limiter, and A/B is not loudness-matched.
+
+### Song-aware automatic themes
+
+The website can now estimate a song’s **sound character** from actual decoded audio—bass/treble balance, brightness, RMS energy and spectral changes—and gradually select calm, warm, deep, bright or energetic colors. The sound palette blends with album artwork and drives the shared background/accent/VU theme. Analysis is local, read-only and taken before volume/EQ; it does not change playback.
+
+In **Playback settings → Automatic music theme → Theme analysis**, choose **Song sound + artwork** (default) or **Artwork colors only**. The panel identifies live analysis versus provisional genre/artwork fallback. Manual theme selection disables automatic changes. Android currently uses the explicit genre/artwork fallback because native FFT telemetry is unavailable; WebView audio is never started as a workaround.
+
+See [SONG_THEME_REPORT.md](SONG_THEME_REPORT.md) for the algorithm, tests, assumptions and the one-positive/five-risk report. Sound-character labels are heuristics—not reliable emotion detection or lyric understanding. The current test suite contains **48 tests**.
+
+### Fullscreen oscilloscope and readable lyrics
+
+In **Now Playing → Sound in motion**, selecting **Oscilloscope** now expands the waveform into the player viewport. The **Fullscreen / Back to player** button expands or restores any visualization. Browser fullscreen (hiding browser chrome) is attempted when permitted, with a working viewport fallback for embedded previews. Escape exits the expanded view first; the close button closes Now Playing. Playback and seeking remain available without restarting audio.
+
+**Lyrics** now has a properly bounded scroll region, wrapping for long lines, adjustable 16–32px text, a fullscreen reading mode and keyboard scrolling. Active lines center relative to their own reader, simultaneous translated lines highlight together, and oversized lines align at the start. Manual scrolling pauses following for five seconds; **Follow lyrics** resumes immediately. See [PLAYER_READER_REPORT.md](PLAYER_READER_REPORT.md) for verification, risks and native/browser limits.

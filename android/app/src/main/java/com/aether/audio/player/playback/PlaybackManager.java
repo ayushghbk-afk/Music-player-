@@ -289,8 +289,8 @@ public final class PlaybackManager {
         for (Listener listener : copyListeners()) listener.onError(message);
     }
 
-    public void applyEQ(boolean enabled, double[] bands, double preamp, double bass, double treble, double width, boolean headroom, boolean protection, double balance, boolean mono) {
-        dsp.update(enabled, bands, preamp, bass, treble, width, headroom, protection, balance, mono);
+    public void applyEQ(boolean enabled, double[] bands, double preamp, double bass, double treble, double width, boolean headroom, boolean protection, double balance, boolean mono, StudioRack rack) {
+        dsp.update(enabled, bands, preamp, bass, treble, width, headroom, protection, balance, mono, rack);
     }
 
     private void drainPendingCommands() {
