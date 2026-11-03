@@ -253,7 +253,7 @@ export function SongList(p: SongListProps) {
                       className="danger"
                       onClick={() => {
                         if (
-                          confirm(`Remove “${track.title}” from your library?`)
+                          confirm(track.sourceUri ? `Remove “${track.title}” from this library? The original file will stay on your device.` : `Remove “${track.title}” from your library?`)
                         )
                           p.onDeleteTrack(track.id);
                         setMenu(null);

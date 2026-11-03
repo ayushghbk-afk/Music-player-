@@ -171,11 +171,12 @@ export class AudioEngine {
     if (!this.usesNativePlayback()) return;
     this.nativeTracks = new Map(tracks.map((track) => [track.id, track]));
     await AetherPlayer.setQueue({
-      tracks: tracks.map(({ id, title, artist, album }) => ({
+      tracks: tracks.map(({ id, title, artist, album, sourceUri }) => ({
         id,
         title,
         artist,
         album,
+        sourceUri,
       })),
       shuffle,
       repeat,
@@ -294,7 +295,7 @@ export class AudioEngine {
       startPosition: position,
     };
 
-    const remoteUrl = audioUrl || track.audioUrl;
+    const remoteUrl = track.sourceUri || audioUrl || track.audioUrl;
     if (
       remoteUrl &&
       (remoteUrl.startsWith("file://") || remoteUrl.startsWith("content://"))

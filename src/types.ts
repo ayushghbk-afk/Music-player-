@@ -5,7 +5,8 @@ export type AudioFormat =
   | "MP3"
   | "AAC"
   | "OGG"
-  | "DSD";
+  | "DSD"
+  | "OTHER";
 
 export interface Track {
   id: string;
@@ -17,6 +18,7 @@ export interface Track {
   bitrate: string; // e.g. "24-bit / 96kHz FLAC"
   isHiRes: boolean;
   coverArt?: string; // base64 or URL or SVG gradient
+  sourceUri?: string; // Android MediaStore content URI; originals are never copied or deleted
   audioUrl?: string; // object URL or data URL
   addedAt: number;
   playCount: number;

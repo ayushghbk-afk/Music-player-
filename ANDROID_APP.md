@@ -17,3 +17,16 @@ Build with `npm run android:apk` on a machine with Java 21/SDK 36. A successful 
 **Verified in GitHub Actions:** [run 41317759218](https://github.com/ayushghbk-afk/Music-player-/actions/runs/41317759218) successfully compiled `assembleDebug`, passed `lintDebug`, verified the debug APK with `apksigner`, and uploaded `aether-debug-apk`. Download/extract that artifact to get `app-debug.apk`. The runner is pinned to Ubuntu 22.04 and uses its preinstalled SDK manager; API-27 theme attributes are version-qualified so minSdk 24 stays supported.
 
 The sandbox still has no native SDK. Physical-device playback, OEM background policies and signed/minified production release behavior remain unverified. The downloadable build uses a debug signing identity, not a release key.
+
+## Device audio discovery
+
+On Android, the app asks for music/audio access on first launch and scans
+MediaStore (including mounted external volumes). Discovered audio is played
+through its `content://` URI without copying or modifying the original file.
+The library refreshes when the app returns to the foreground; use the circular
+arrow in the header to rescan or retry permission. If access is denied, enable
+Music and audio access in Android settings or use manual import instead.
+Removing a discovered track hides it from the app and leaves the original file
+untouched. Files in private app folders, protected downloads, or excluded from
+Android's media index cannot be discovered. Previously imported copies can
+appear alongside their originals. Available codecs depend on the device.

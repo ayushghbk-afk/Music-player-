@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   X,
   LoaderCircle,
+  RefreshCw,
 } from "lucide-react";
 import {
   Track,
@@ -37,6 +38,7 @@ import {
   generateSynthesizedTrackBlob,
 } from "./services/sampleLibrary";
 import { audioEngine, type PlaybackStatus } from "./services/audioEngine";
+import { isAndroidLibrary, scanAndroidLibrary } from "./services/androidLibrary";
 import { useSongTheme } from "./services/useSongTheme";
 import { eqSchema, settingsSchema } from "./services/backupSchema";
 
@@ -100,6 +102,7 @@ const revokeTrackAudioUrls = (trackList: Track[]) => {
 
 let seedPromise: Promise<void> | null = null;
 async function seedLibrary() {
+  if (isAndroidLibrary()) return;
   if (!seedPromise)
     seedPromise = (async () => {
       if (await getKV("demoSeeded", false)) return;
@@ -171,6 +174,9 @@ export default function App() {
   const [playbackError, setPlaybackError] = useState("");
   const [playbackStatus, setPlaybackStatus] = useState<PlaybackStatus>("idle");
   const [libraryLoading, setLibraryLoading] = useState(true);
+  const [scanMessage, setScanMessage] = useState("");
+  const [scanning, setScanning] = useState(false);
+  const scanInFlight = useRef<Promise<void> | null>(null);
   const preferencesLoaded = useRef(false);
   const durationSaved = useRef(new Map<string, number>());
   const songTheme = useSongTheme(
@@ -353,6 +359,12 @@ export default function App() {
       if (refreshedCurrent) {
         currentTrackRef.current = refreshedCurrent;
         setCurrentTrack(refreshedCurrent);
+      } else if (currentTrackRef.current?.sourceUri) {
+        // A successful scan removed an entry that no longer exists on a mounted volume.
+        audioEngine.pause();
+        currentTrackRef.current = null;
+        setCurrentTrack(null);
+        prepared.current = false;
       }
       const loadedPlaylists = await getAllPlaylists();
       setPlaylists(loadedPlaylists);
@@ -394,11 +406,44 @@ export default function App() {
     }
   }, []);
 
-  useEffect(() => {
-    loadLibrary().catch((error) =>
-      setPlaybackError("Library initialization failed: " + error.message),
-    );
+  const refreshAndroidLibrary = useCallback((requestPermission: boolean) => {
+    if (scanInFlight.current) return scanInFlight.current;
+    const task = (async () => {
+      setScanning(true);
+      try {
+        const result = await scanAndroidLibrary(requestPermission);
+        setScanMessage(result === "denied"
+          ? "Audio access is off. Tap Rescan and allow access, or enable Music and audio in Android app settings. Manual import is still available."
+          : "");
+      } catch (error) {
+        setScanMessage(`Could not scan device audio: ${error instanceof Error ? error.message : "Unknown error"}. Try Rescan.`);
+      } finally {
+        setScanning(false);
+      }
+      await loadLibrary();
+    })();
+    scanInFlight.current = task;
+    void task.finally(() => { if (scanInFlight.current === task) scanInFlight.current = null; }).catch(() => {});
+    return task;
   }, [loadLibrary]);
+
+  useEffect(() => {
+    let disposed = false;
+    let listener: { remove: () => Promise<void> } | undefined;
+    const init = async () => {
+      if (!isAndroidLibrary()) return loadLibrary();
+      const asked = await getKV("audioPermissionRequested", false);
+      if (!asked) await setKV("audioPermissionRequested", true);
+      await refreshAndroidLibrary(!asked);
+      if (disposed) return;
+      const handle = await CapacitorApp.addListener("appStateChange", ({ isActive }) => {
+        if (isActive) void refreshAndroidLibrary(false).catch(() => {});
+      });
+      if (disposed) void handle.remove(); else listener = handle;
+    };
+    void init().catch(error => setPlaybackError("Library initialization failed: " + error.message));
+    return () => { disposed = true; void listener?.remove(); };
+  }, [loadLibrary, refreshAndroidLibrary]);
 
   useEffect(() => {
     audioEngine.setCallbacks({
@@ -687,6 +732,12 @@ export default function App() {
           )}
         </div>
       )}
+      {scanMessage && isAndroidLibrary() && (
+        <div role="status" className="android-scan-notice">
+          <span>{scanMessage}</span>
+          <button onClick={() => setScanMessage("")} aria-label="Dismiss audio access message">Dismiss</button>
+        </div>
+      )}
       {playbackError && (
         <div
           role="alert"
@@ -908,6 +959,12 @@ export default function App() {
               >
                 <Settings2 size={18} />
               </button>
+              {isAndroidLibrary() && (
+                <button className="icon-button" title="Rescan device audio" aria-label="Rescan device audio"
+                  disabled={scanning} onClick={() => void refreshAndroidLibrary(true).catch(error => setPlaybackError(error.message))}>
+                  <RefreshCw size={18} />
+                </button>
+              )}
               <button
                 className="header-import"
                 aria-label="Import music"

@@ -4496,3 +4496,22 @@ select option {
 .playback-settings > .song-theme-status {
   color: var(--accent);
 }
+
+.android-scan-notice {
+  position: fixed;
+  z-index: 119;
+  top: 72px;
+  left: 16px;
+  right: 16px;
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border: 1px solid #8b774e;
+  border-radius: 12px;
+  background: #242019;
+  color: #f5e8c9;
+  font-size: 13px;
+}
+.android-scan-notice button { color: inherit; text-decoration: underline; }
