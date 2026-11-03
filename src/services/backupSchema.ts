@@ -78,7 +78,7 @@ export const trackSchema = z.object({
   artist: text(500),
   album: text(500),
   duration: number(0, 86400),
-  format: z.enum(["FLAC", "WAV", "ALAC", "MP3", "AAC", "OGG", "DSD"]),
+  format: z.enum(["FLAC", "WAV", "ALAC", "MP3", "AAC", "OGG", "DSD", "OTHER"]),
   bitrate: text(200),
   isHiRes: z.boolean(),
   coverArt: artwork.optional(),

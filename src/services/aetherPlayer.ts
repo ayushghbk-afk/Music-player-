@@ -24,9 +24,17 @@ export interface ServerInfo {
   token?: string;
 }
 
+export interface AndroidAudio {
+  id: string; uri: string; name: string | null; title: string | null;
+  artist: string | null; album: string | null; duration: number;
+  size: number; mimeType: string | null; addedAt: number;
+}
+
 export interface AetherPlayerPlugin {
+  scanAudio(options: { requestPermission: boolean }): Promise<{ permission: "granted" | "denied"; tracks?: AndroidAudio[]; volumes?: string[] }>;
+
   setQueue(options: {
-    tracks: { id: string; title: string; artist: string; album: string }[];
+    tracks: { id: string; title: string; artist: string; album: string; sourceUri?: string }[];
     shuffle: boolean;
     repeat: "off" | "all" | "one";
     autoplay: boolean;

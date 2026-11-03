@@ -1,6 +1,15 @@
 package com.aether.audio.player.playback;
 
 import android.net.Uri;
+import android.Manifest;
+import android.content.ContentUris;
+import android.database.Cursor;
+import android.provider.MediaStore;
+import androidx.core.content.ContextCompat;
+import android.content.pm.PackageManager;
+import com.getcapacitor.annotation.Permission;
+import com.getcapacitor.annotation.PermissionCallback;
+import com.getcapacitor.JSArray;
 import android.os.Build;
 import android.util.Base64;
 
@@ -14,7 +23,10 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 
 import java.io.File;
 
-@CapacitorPlugin(name = "AetherPlayer")
+@CapacitorPlugin(name = "AetherPlayer", permissions = {
+    @Permission(alias = "audio", strings = { Manifest.permission.READ_MEDIA_AUDIO }),
+    @Permission(alias = "storage", strings = { Manifest.permission.READ_EXTERNAL_STORAGE })
+})
 @androidx.media3.common.util.UnstableApi
 public class MusicPlayerPlugin extends Plugin implements PlaybackManager.Listener {
 
@@ -49,6 +61,84 @@ public class MusicPlayerPlugin extends Plugin implements PlaybackManager.Listene
             trackServer = null;
         }
         super.handleOnDestroy();
+    }
+
+    private String audioPermission() {
+        return Build.VERSION.SDK_INT >= 33 ? Manifest.permission.READ_MEDIA_AUDIO : Manifest.permission.READ_EXTERNAL_STORAGE;
+    }
+
+    @PluginMethod
+    public void scanAudio(PluginCall call) {
+        if (ContextCompat.checkSelfPermission(getContext(), audioPermission()) != PackageManager.PERMISSION_GRANTED) {
+            if (call.getBoolean("requestPermission", false)) {
+                requestPermissionForAlias(Build.VERSION.SDK_INT >= 33 ? "audio" : "storage", call, "audioPermissionResult");
+            } else {
+                JSObject result = new JSObject();
+                result.put("permission", "denied");
+                call.resolve(result);
+            }
+            return;
+        }
+        queryAudio(call);
+    }
+
+    @PermissionCallback
+    private void audioPermissionResult(PluginCall call) {
+        if (ContextCompat.checkSelfPermission(getContext(), audioPermission()) != PackageManager.PERMISSION_GRANTED) {
+            JSObject result = new JSObject();
+            result.put("permission", "denied");
+            call.resolve(result);
+            return;
+        }
+        queryAudio(call);
+    }
+
+    private void queryAudio(PluginCall call) {
+        // Run the potentially large MediaStore query off the UI thread, including
+        // when this method is reached from the permission callback.
+        new Thread(() -> {
+            try {
+                JSArray tracks = new JSArray();
+                java.util.Set<String> volumes = Build.VERSION.SDK_INT >= 29
+                    ? MediaStore.getExternalVolumeNames(getContext())
+                    : java.util.Collections.singleton("external");
+                String[] columns = { MediaStore.Audio.Media._ID, MediaStore.Audio.Media.DISPLAY_NAME,
+                    MediaStore.Audio.Media.TITLE, MediaStore.Audio.Media.ARTIST, MediaStore.Audio.Media.ALBUM,
+                    MediaStore.Audio.Media.DURATION, MediaStore.Audio.Media.SIZE, MediaStore.Audio.Media.MIME_TYPE,
+                    MediaStore.Audio.Media.DATE_ADDED };
+                for (String volume : volumes) {
+                    Uri collection = Build.VERSION.SDK_INT >= 29
+                        ? MediaStore.Audio.Media.getContentUri(volume) : MediaStore.Audio.Media.EXTERNAL_CONTENT_URI;
+                    try (Cursor cursor = getContext().getContentResolver().query(collection, columns, null, null, null)) {
+                        if (cursor == null) throw new IllegalStateException("Android media library is unavailable");
+                        while (cursor.moveToNext()) {
+                            long id = cursor.getLong(0);
+                            JSObject track = new JSObject();
+                            track.put("id", "media-" + volume + "-" + id);
+                            track.put("uri", ContentUris.withAppendedId(collection, id).toString());
+                            track.put("name", cursor.getString(1));
+                            track.put("title", cursor.getString(2));
+                            track.put("artist", cursor.getString(3));
+                            track.put("album", cursor.getString(4));
+                            track.put("duration", cursor.getLong(5));
+                            track.put("size", cursor.getLong(6));
+                            track.put("mimeType", cursor.getString(7));
+                            track.put("addedAt", cursor.getLong(8));
+                            tracks.put(track);
+                        }
+                    }
+                }
+                JSObject result = new JSObject();
+                result.put("permission", "granted");
+                result.put("tracks", tracks);
+                JSArray scannedVolumes = new JSArray();
+                for (String volume : volumes) scannedVolumes.put(volume);
+                result.put("volumes", scannedVolumes);
+                call.resolve(result);
+            } catch (Exception error) {
+                call.reject("Unable to scan Android audio: " + error.getMessage(), error);
+            }
+        }, "aether-media-scan").start();
     }
 
     // ---------------------------------------------------------------------
@@ -249,10 +339,15 @@ public class MusicPlayerPlugin extends Plugin implements PlaybackManager.Listene
             java.util.List<androidx.media3.common.MediaItem> items = new java.util.ArrayList<>();
             if (tracks != null) for(int i=0;i<tracks.length();i++) {
                 org.json.JSONObject track=tracks.getJSONObject(i);
-                File file=manager.findStoredTrack(track.getString("id"));
-                if(file==null) continue;
+                String source = track.optString("sourceUri", "");
+                Uri uri = Uri.parse(source);
+                if (!"content".equals(uri.getScheme()) || !"media".equals(uri.getAuthority())) {
+                    File file = manager.findStoredTrack(track.getString("id"));
+                    if (file == null) continue;
+                    uri = Uri.fromFile(file);
+                }
                 items.add(new androidx.media3.common.MediaItem.Builder().setMediaId(track.getString("id"))
-                    .setUri(Uri.fromFile(file)).setMediaMetadata(new androidx.media3.common.MediaMetadata.Builder()
+                    .setUri(uri).setMediaMetadata(new androidx.media3.common.MediaMetadata.Builder()
                     .setTitle(track.optString("title")).setArtist(track.optString("artist")).setAlbumTitle(track.optString("album")).build()).build());
             }
             int repeat = "one".equals(call.getString("repeat")) ? Player.REPEAT_MODE_ONE : "all".equals(call.getString("repeat")) ? Player.REPEAT_MODE_ALL : Player.REPEAT_MODE_OFF;

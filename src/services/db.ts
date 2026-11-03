@@ -120,12 +120,16 @@ export async function getTrackBlob(trackId: string): Promise<Blob | undefined> {
 
 // Delete Track
 export async function deleteTrack(trackId: string): Promise<void> {
-  if (isAndroidNative()) {
-    // Best effort: drop the stored audio file alongside the metadata.
+  const db = await getDB();
+  const tx = db.transaction(["tracks", "audioBlobs", "kv"], "readwrite");
+  const track = await tx.objectStore("tracks").get(trackId) as Track | undefined;
+  if (track?.sourceUri) {
+    // Removing a discovered track hides it from this app, not from the device.
+    const hidden = (await tx.objectStore("kv").get("hiddenMediaTracks") as string[] | undefined) || [];
+    if (!hidden.includes(trackId)) await tx.objectStore("kv").put([...hidden, trackId], "hiddenMediaTracks");
+  } else if (isAndroidNative()) {
     void deleteNativeTrack(trackId);
   }
-  const db = await getDB();
-  const tx = db.transaction(["tracks", "audioBlobs"], "readwrite");
   await tx.objectStore("tracks").delete(trackId);
   await tx.objectStore("audioBlobs").delete(trackId);
   await tx.done;
@@ -201,7 +205,7 @@ export async function createFullBackupPayload(
   const favorites = await getKV<string[]>("favorites", []);
 
   // Exclude ephemeral object URLs from backup metadata
-  const trackMetadata = tracks.map(({ audioUrl, ...rest }) => rest);
+  const trackMetadata = tracks.map(({ audioUrl, sourceUri, ...rest }) => rest);
 
   return {
     version: "1.0.0",
