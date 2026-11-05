@@ -102,13 +102,16 @@ All JSON errors use `{ "success": false, "error": "…", "code": "…" }`; succe
 
 Access tokens are returned as `accessToken` (with `token` as a compatibility alias) and `expiresAt` in milliseconds. They last 15 minutes and stay in frontend memory. Refresh tokens last 30 days in a `Secure; HttpOnly; SameSite=None; Path=/` cookie and rotate on every refresh. Refresh replay revokes the session. Logout and role/session checks also consult Turso.
 
+The Worker also accepts existing external HS256 access tokens from the originally supplied login system when they contain `sub`, `role`, and `exp`. Their signature and expiry are verified, but the token's role is **never** used for authorization: the current role is loaded from Turso on every request. These older tokens have no rotating refresh cookie or server-side session to revoke, so they remain usable only until their signed `exp`; new logins use the rotating-session flow above. External tokens can obtain song-specific, expiring stream tickets without making `/stream` public.
+
 Browser privacy settings that block all cross-site cookies can prevent refresh-cookie persistence between GitHub Pages and `workers.dev`; the user can sign in again. Do not weaken this by moving long-lived tokens into localStorage.
 
 ## Upload and deletion safety
 
 - Formats: MP3, M4A, AAC/ADTS, WAV/RIFF, OGG, FLAC.
 - Maximum upload: 100 MiB (suitable for Cloudflare's request limits); extension, MIME, magic bytes, and size are all checked.
-- Object keys use `audio/<authenticated-user-id>/<uuid>.<extension>` and are never returned by the API.
+- New object keys follow the supplied Worker's `songs/<uuid>.<extension>` layout and are never returned by the API. Existing `audio/<user>/…` objects remain playable through their stored `b2_key`.
+- New `songs.added_at` values use the existing Unix-seconds convention; the frontend also accepts millisecond timestamps.
 - `uploaded_by` always comes from the authenticated database user, never multipart/browser IDs.
 - Upload order: B2 PUT → Turso INSERT. A failed insert triggers best-effort B2 compensation.
 - Delete order: authorize → B2 DELETE → Turso DELETE. If B2 fails, metadata remains for a safe retry. If the final metadata delete fails, the API returns `METADATA_DELETE_FAILED` rather than claiming success.
