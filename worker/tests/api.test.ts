@@ -1,7 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import bcrypt from "bcryptjs";
+import { createHmac } from "node:crypto";
 import { call, cookie, env, fixture, json, jsonBody, wavFile } from "./helpers";
+
+function externalToken(subject: string, role: "admin" | "user" = "admin", exp = Math.floor(Date.now() / 1000) + 300): string {
+  const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  const input = `${encode({ alg: "HS256", typ: "JWT" })}.${encode({ sub: subject, role, exp })}`;
+  const signature = createHmac("sha256", env.AUTH_SECRET).update(input).digest("base64url");
+  return `${input}.${signature}`;
+}
 
 const registration = {
   username: "listener_one",
@@ -84,6 +92,9 @@ test("complete cloud music and authorization flow", async () => {
   assert.equal(uploaded.song.file_size, wavFile().size);
   assert(!("b2_key" in uploaded.song), "private object keys must not be returned");
   assert.equal(storage.objects.size, 1);
+  const storedUpload = database.raw.prepare("SELECT b2_key,added_at FROM songs WHERE id=?").get(uploaded.song.id) as any;
+  assert.match(String(storedUpload.b2_key), /^songs\/.+\.wav$/, "new uploads use the supplied Worker's key layout");
+  assert.ok(Number(storedUpload.added_at) < 1e12, "song timestamps retain the existing Unix-seconds convention");
 
   const publicSongs = await json(await call(handler, "/songs"));
   assert.equal(publicSongs.songs.length, 1);
@@ -146,6 +157,47 @@ test("complete cloud music and authorization flow", async () => {
   assert.equal((await json(replay)).code, "SESSION_REPLAY");
   const revokedAccess = await call(handler, "/auth/me", { token: refreshedBody.accessToken });
   assert.equal(revokedAccess.status, 401);
+});
+
+test("existing external HS256 tokens retain private streaming and use current Turso roles", async () => {
+  const { handler, database, storage } = fixture();
+  const health = await call(handler, "/health");
+  assert.equal(health.status, 200);
+  await database.query(
+    "INSERT INTO users(id,username,email,password_hash,created_at,role) VALUES(?,?,?,?,?,?)",
+    ["external-user", "external", "external@example.com", "not-used-for-token-auth", Math.floor(Date.now() / 1000), "user"],
+  );
+  const audio = wavFile();
+  storage.objects.set("songs/existing-song.wav", {
+    bytes: new Uint8Array(await audio.arrayBuffer()),
+    mime: "audio/wav",
+  });
+  await database.query(
+    `INSERT INTO songs(id,title,artist,album,duration,cover_url,added_at,b2_key,mime_type,file_size,uploaded_by)
+     VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+    ["existing-song", "Existing upload", "Legacy", null, 2, null, Math.floor(Date.now() / 1000), "songs/existing-song.wav", "audio/wav", audio.size, "external-user"],
+  );
+
+  // The token claims admin, but Turso says user. The database must win.
+  const token = externalToken("external-user", "admin");
+  const me = await call(handler, "/auth/me", { token });
+  assert.equal(me.status, 200);
+  assert.equal((await json(me)).user.role, "user");
+  assert.equal((await call(handler, "/admin/users", { token })).status, 403);
+
+  const songs = await json(await call(handler, "/songs", { token }));
+  const stream = new URL(songs.songs[0].stream_url);
+  assert.equal((await call(handler, "/stream/existing-song")).status, 401);
+  const playback = await call(handler, `${stream.pathname}${stream.search}`, {
+    headers: { Range: "bytes=0-9" },
+  });
+  assert.equal(playback.status, 206);
+  assert.equal((await playback.arrayBuffer()).byteLength, 10);
+
+  await database.query("UPDATE users SET role='admin' WHERE id=?", ["external-user"]);
+  assert.equal((await call(handler, "/admin/users", { token })).status, 200, "role changes take effect without minting a new external token");
+  const expired = externalToken("external-user", "admin", Math.floor(Date.now() / 1000) - 1);
+  assert.equal((await call(handler, "/auth/me", { token: expired })).status, 401);
 });
 
 test("migrations preserve an existing bcrypt user and add only missing columns", async () => {

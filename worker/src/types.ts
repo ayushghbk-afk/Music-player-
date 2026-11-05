@@ -48,6 +48,8 @@ export interface UserRow {
 export interface AuthContext {
   user: UserRow;
   sessionId: string;
+  /** Existing external HS256 tokens have no server-side refresh session. */
+  legacy?: boolean;
 }
 
 export interface SongRow {

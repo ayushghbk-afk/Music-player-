@@ -1,5 +1,5 @@
 import { B2Storage } from "./b2";
-import { signToken, verifyToken, type TokenClaims } from "./jwt";
+import { signToken, verifyLegacyAccessToken, verifyToken, type TokenClaims } from "./jwt";
 import { hashPassword, passwordProblem, verifyDummyPassword, verifyPassword } from "./passwords";
 import { migrateDatabase } from "./schema";
 import { TursoDatabase } from "./turso";
@@ -37,6 +37,9 @@ const STREAM_SECONDS = 12 * 3600;
 const MAX_UPLOAD = 100 * 1024 * 1024;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SONG_SELECT = "SELECT id,title,artist,album,duration,cover_url,added_at,b2_key,mime_type,file_size,uploaded_by FROM songs";
+// External tokens from the original Worker have no auth_sessions row. Stream
+// tickets use this internal marker and still require a current Turso user.
+const LEGACY_SESSION_ID = "00000000-0000-0000-0000-000000000000";
 
 interface AudioKind {
   extension: string;
@@ -139,14 +142,19 @@ async function userById(database: Database, id: string): Promise<UserRow | null>
 }
 
 async function requireSession(database: Database, claims: TokenClaims): Promise<AuthContext> {
-  const session = await database.query(
-    "SELECT id FROM auth_sessions WHERE id=? AND user_id=? AND revoked_at IS NULL AND expires_at>? LIMIT 1",
-    [claims.sid, claims.sub, Date.now()],
-  );
-  if (!session.rows.length) throw new HttpError(401, "SESSION_REVOKED", "Your session has ended. Sign in again.");
+  if (claims.legacy && (claims.typ !== "stream" || claims.sid !== LEGACY_SESSION_ID)) {
+    throw new HttpError(401, "INVALID_TOKEN", "Your session is invalid or has expired. Sign in again.");
+  }
+  if (!claims.legacy) {
+    const session = await database.query(
+      "SELECT id FROM auth_sessions WHERE id=? AND user_id=? AND revoked_at IS NULL AND expires_at>? LIMIT 1",
+      [claims.sid, claims.sub, Date.now()],
+    );
+    if (!session.rows.length) throw new HttpError(401, "SESSION_REVOKED", "Your session has ended. Sign in again.");
+  }
   const user = await userById(database, claims.sub);
   if (!user) throw new HttpError(401, "ACCOUNT_UNAVAILABLE", "This account is no longer available");
-  return { user, sessionId: claims.sid };
+  return { user, sessionId: claims.sid, legacy: claims.legacy === true };
 }
 
 async function requireUser(request: Request, database: Database, env: Env): Promise<AuthContext> {
@@ -154,7 +162,20 @@ async function requireUser(request: Request, database: Database, env: Env): Prom
   if (!authorization.startsWith("Bearer ")) {
     throw new HttpError(401, "AUTH_REQUIRED", "Sign in to continue");
   }
-  const claims = await verifyToken(env.AUTH_SECRET, authorization.slice(7).trim(), "access");
+  const token = authorization.slice(7).trim();
+  let claims: TokenClaims;
+  try {
+    claims = await verifyToken(env.AUTH_SECRET, token, "access");
+  } catch (error) {
+    if (!(error instanceof HttpError) || error.status !== 401) throw error;
+    // Compatibility with the supplied original Worker: externally issued
+    // HS256 sub/role/exp tokens remain valid until expiry. Never trust their
+    // role claim for authorization; the current Turso role is authoritative.
+    const legacy = await verifyLegacyAccessToken(env.AUTH_SECRET, token);
+    const user = await userById(database, legacy.sub);
+    if (!user) throw new HttpError(401, "ACCOUNT_UNAVAILABLE", "This account is no longer available");
+    return { user, sessionId: LEGACY_SESSION_ID, legacy: true };
+  }
   return requireSession(database, claims);
 }
 
@@ -217,6 +238,7 @@ async function songWithStream(
     sid: auth.sessionId,
     typ: "stream",
     song: song.id,
+    legacy: auth.legacy === true ? true : undefined,
     expiresIn: seconds,
   });
   return { ...withoutStorageKey(song), stream_url: streamUrl(origin, song.id, ticket.token), stream_expires_at: ticket.expiresAt };
@@ -466,7 +488,9 @@ export function createHandler(dependencies: WorkerDependencies = {}) {
         const durationValue = Number(form.get("duration") || 0);
         const duration = Number.isFinite(durationValue) ? Math.max(0, Math.min(86400, Math.round(durationValue))) : 0;
         const id = crypto.randomUUID();
-        const key = `audio/${auth.user.id}/${id}.${kind.extension}`;
+        // Match the supplied Worker's object layout. Existing audio/<user>/…
+        // keys remain readable because streaming always uses the stored b2_key.
+        const key = `songs/${id}.${kind.extension}`;
         const title = metadataText(form.get("title"), uploaded.name.replace(/\.[^.]+$/, ""), 500);
         const artist = metadataText(form.get("artist"), "Unknown artist", 500);
         const album = metadataText(form.get("album"), "Cloud uploads", 500);
@@ -476,7 +500,7 @@ export function createHandler(dependencies: WorkerDependencies = {}) {
           await db.query(
             `INSERT INTO songs(id,title,artist,album,duration,cover_url,added_at,b2_key,mime_type,file_size,uploaded_by)
              VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-            [id, title, artist, album, duration, artwork, Date.now(), key, kind.mime, uploaded.size, auth.user.id],
+            [id, title, artist, album, duration, artwork, Math.floor(Date.now() / 1000), key, kind.mime, uploaded.size, auth.user.id],
           );
         } catch (error) {
           try {
