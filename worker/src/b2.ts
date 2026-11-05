@@ -7,7 +7,7 @@ function awsEncode(value: string): string {
   return encodeURIComponent(value).replace(/[!'()*]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
 }
 
-async function hmac(key: CryptoKey | ArrayBuffer, value: string): Promise<ArrayBuffer> {
+async function hmac(key: CryptoKey | BufferSource, value: string): Promise<ArrayBuffer> {
   const cryptoKey = key instanceof CryptoKey
     ? key
     : await crypto.subtle.importKey("raw", key, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);

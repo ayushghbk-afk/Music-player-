@@ -74,7 +74,7 @@ async function verifyScrypt(password: string, encoded: string): Promise<boolean>
 
 async function derivePbkdf2(
   password: string,
-  salt: Uint8Array,
+  salt: Uint8Array<ArrayBuffer>,
   iterations: number,
   algorithm: "SHA-256" | "SHA-512",
   length: number,
@@ -90,7 +90,7 @@ async function verifyPbkdf2(password: string, encoded: string): Promise<boolean>
   const parts = encoded.split("$");
   let algorithm: "SHA-256" | "SHA-512";
   let iterations: number;
-  let salt: Uint8Array;
+  let salt: Uint8Array<ArrayBuffer>;
   let expected: Uint8Array;
   if (parts.length === 5 && parts[0] === "pbkdf2") {
     algorithm = parts[1] === "sha512" ? "SHA-512" : "SHA-256";

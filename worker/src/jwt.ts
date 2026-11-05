@@ -23,7 +23,7 @@ export interface LegacyAccessClaims {
   exp: number;
 }
 
-function secretBytes(secret: string): Uint8Array {
+function secretBytes(secret: string): Uint8Array<ArrayBuffer> {
   const bytes = new TextEncoder().encode(secret || "");
   if (bytes.length < 32) throw new HttpError(503, "AUTH_NOT_CONFIGURED", "Authentication is not configured securely");
   return bytes;
