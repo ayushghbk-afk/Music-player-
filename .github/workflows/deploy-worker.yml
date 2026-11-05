@@ -35,6 +35,14 @@ jobs:
         working-directory: worker
         run: npm run check
 
+      - name: Test Worker
+        working-directory: worker
+        run: npm test
+
+      - name: Verify Worker bundle
+        working-directory: worker
+        run: npm run build
+
       - name: Deploy Worker
         working-directory: worker
         run: npx wrangler deploy
