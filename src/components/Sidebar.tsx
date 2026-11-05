@@ -23,6 +23,7 @@ export type NavView =
   | "equalizer"
   | "backup"
   | "import"
+  | "admin"
   | "ai-assistant";
 interface SidebarProps {
   currentView: NavView;
@@ -35,6 +36,7 @@ interface SidebarProps {
   onSelectTheme: (theme: ThemeOption) => void;
   onTriggerImport: () => void;
   eqEnabled?: boolean;
+  isAdmin?: boolean;
   isCollapsed?: boolean;
   onToggleCollapse?: () => void;
 }
@@ -75,6 +77,7 @@ export function Sidebar(p: SidebarProps) {
         },
         { id: "ai-assistant", label: "Sound assistant", icon: Sparkles },
         { id: "backup", label: "Backup & sync", icon: Database },
+        ...(p.isAdmin ? [{ id: "admin", label: "Admin dashboard", icon: ShieldCheck }] : []),
       ],
     },
   ];

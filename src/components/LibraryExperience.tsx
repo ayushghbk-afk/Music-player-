@@ -55,7 +55,7 @@ export function LibraryExperience({
       </div>
       <div className="mobile-collection-summary">
         <span>
-          <ShieldCheck size={13} /> YOUR OFFLINE COLLECTION
+          <ShieldCheck size={13} /> {tracks.some((track) => track.storage === "cloud") ? "YOUR MUSIC LIBRARY" : "YOUR OFFLINE COLLECTION"}
         </span>
         <strong>
           {tracks.length} tracks <i>·</i>{" "}
@@ -97,7 +97,7 @@ export function LibraryExperience({
         </div>
         <div className="feature-caption">
           <span>CURATED FOR YOUR EARS</span>
-          <small>Local files. Limitless feeling.</small>
+          <small>{tracks.some((track) => track.storage === "cloud") ? "Local files. Cloud streaming." : "Local files. Limitless feeling."}</small>
         </div>
         <div className="feature-edition">
           AETHER ORIGINALS <span>VOL. 01 — SOUNDSCAPES</span>
@@ -225,7 +225,7 @@ export function ListeningPanel({
             <span>
               {currentTrack.bitDepth
                 ? `${currentTrack.bitDepth}-bit`
-                : "Local file"}
+                : currentTrack.storage === "cloud" ? "Cloud stream" : "Local file"}
             </span>
             <span>
               {currentTrack.sampleRate
@@ -281,7 +281,7 @@ export function ListeningPanel({
       </button>
       <div className="private-note">
         <ShieldCheck size={13} />
-        <span>On your device. In your control.</span>
+        <span>{tracks.some((track) => track.storage === "cloud") ? "Local + cloud. In your control." : "On your device. In your control."}</span>
       </div>
     </aside>
   );

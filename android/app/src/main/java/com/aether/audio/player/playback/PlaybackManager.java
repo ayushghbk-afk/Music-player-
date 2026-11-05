@@ -130,7 +130,7 @@ public final class PlaybackManager {
         // NETWORK is a superset of LOCAL: holds a partial wake lock during
         // playback (required for local files) plus a Wi-Fi lock for http(s)
         // streams. The screen must NOT be kept awake for audio playback.
-        exoPlayer.setWakeMode(C.WAKE_MODE_LOCAL);
+        exoPlayer.setWakeMode(C.WAKE_MODE_NETWORK);
         player = exoPlayer;
         player.addListener(new Player.Listener() {
             @Override

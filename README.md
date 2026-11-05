@@ -1,6 +1,10 @@
 # Aether — Hi-Res Audio Player
 
-Offline-first local music player for Web and Android (`com.aether.audio.player`). React 19, TypeScript 5.8, Tailwind 4/Vite 6, Capacitor 8 and Media3 1.5.1. Dependencies are pinned in `package.json` and `package-lock.json`.
+Offline-first local music player for Web and Android (`com.aether.audio.player`), with an optional authenticated Turso + private Backblaze B2 cloud library. React 19, TypeScript 5.8, Tailwind 4/Vite 6, Capacitor 8 and Media3 1.5.1. Dependencies are pinned in `package.json` and `package-lock.json`.
+
+## Multi-user cloud library
+
+The existing player now includes real registration/login, rotating sessions, profiles, cloud uploads with progress, private B2 streaming with Range/seek support, owner/admin deletion, and an admin user/role dashboard. Local playback and imports still work without an account. The complete Cloudflare Worker is in `worker/`; see **[CLOUD_PLATFORM.md](CLOUD_PLATFORM.md)** for integration details and **[worker/README.md](worker/README.md)** for deployment, missing-only migrations, legacy password handling, API routes, and secure first-admin promotion. Never put Turso, B2, or JWT secrets in the frontend or GitHub Pages configuration.
 
 ## Studio UI
 
@@ -43,11 +47,12 @@ npm start          # production Express server
 
 ## GitHub Pages
 
-`npm run build:pages` produces a static, project-path-aware site at `/Music-player-/` with scoped offline caching. The Pages workflow deploys from `main`; pull requests build/test without publishing. See [GITHUB_PAGES.md](GITHUB_PAGES.md) for setup, the public URL and companion-server configuration. Local playback and JSON backups need no server; AI and server snapshots do.
+`npm run build:pages` produces a static, project-path-aware site at `/Music-player-/` with scoped offline caching. The Pages workflow deploys from `main`; pull requests build/test without publishing. See [GITHUB_PAGES.md](GITHUB_PAGES.md) for setup, the public URL and companion-server configuration. Local playback and JSON backups need no server; AI and server snapshots do. Cloud music uses the separate Worker and needs no secrets in the Pages build.
 
 ## Implemented
 
-- Local import with `music-metadata` ID3/Vorbis/MP4 tags and embedded raster artwork; stable SHA-256 IDs deduplicate repeat imports. Web picker/drop area and Android WebView document picker. No streaming catalog.
+- Local import with `music-metadata` ID3/Vorbis/MP4 tags and embedded raster artwork; stable SHA-256 IDs deduplicate repeat imports. Web picker/drop area and Android WebView document picker.
+- Optional multi-user cloud catalog with scrypt registration/login, in-memory access tokens and rotating HttpOnly refresh cookies, Turso metadata, private B2 uploads/streaming/deletion, HTTP Range seeking, user ownership, and database-verified admin roles. See the cloud guides above for live deployment requirements.
 - Songs/search/sort, resolution-based Hi-Res Vault, albums, playlist CRUD, favorites and library-only tag editing including lyrics and track number.
 - Five synthesized 25-second stereo **24-bit/96 kHz PCM WAV** demos generated with `OfflineAudioContext`. These are synthesized demonstrations, not recordings, DSD files, or proof of the device's output resolution.
 - Web HTMLAudioElement with preamp, ten EQ bands, bass/treble shelving, stereo matrix, analyser and master gain; native-only ExoPlayer routing on Android with no WebView playback fallback.

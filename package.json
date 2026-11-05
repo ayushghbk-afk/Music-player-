@@ -17,7 +17,10 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts",
-    "build:pages": "vite build --mode pages && node scripts/finalize-pwa.mjs --pages"
+    "build:pages": "vite build --mode pages && node scripts/finalize-pwa.mjs --pages",
+    "worker:check": "npm --prefix worker run check",
+    "worker:test": "npm --prefix worker test",
+    "worker:build": "npm --prefix worker run build"
   },
   "dependencies": {
     "@capacitor/android": "8.6.0",

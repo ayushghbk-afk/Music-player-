@@ -34,7 +34,7 @@ export interface AetherPlayerPlugin {
   scanAudio(options: { requestPermission: boolean }): Promise<{ permission: "granted" | "denied"; tracks?: AndroidAudio[]; volumes?: string[] }>;
 
   setQueue(options: {
-    tracks: { id: string; title: string; artist: string; album: string; sourceUri?: string }[];
+    tracks: { id: string; title: string; artist: string; album: string; sourceUri?: string; audioUrl?: string; cloud?: boolean }[];
     shuffle: boolean;
     repeat: "off" | "all" | "one";
     autoplay: boolean;
@@ -74,6 +74,7 @@ export interface AetherPlayerPlugin {
     artist: string;
     album: string;
     startPosition?: number;
+    cloud?: boolean;
   }): Promise<AetherPlayerState>;
   play(): Promise<AetherPlayerState>;
   pause(): Promise<AetherPlayerState>;

@@ -19,7 +19,12 @@ export interface Track {
   isHiRes: boolean;
   coverArt?: string; // base64 or URL or SVG gradient
   sourceUri?: string; // Android MediaStore content URI; originals are never copied or deleted
-  audioUrl?: string; // object URL or data URL
+  audioUrl?: string; // object URL, data URL, or authenticated cloud stream URL
+  storage?: "local" | "cloud"; // absent means a legacy local IndexedDB record
+  cloudId?: string; // un-prefixed Turso song ID; never supplied as authorization proof
+  uploadedBy?: string; // display/ownership hint only; the Worker re-checks every delete
+  streamExpiresAt?: number;
+  mimeType?: string;
   addedAt: number;
   playCount: number;
   lastPlayed?: number;

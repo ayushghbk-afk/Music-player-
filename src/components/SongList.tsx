@@ -13,6 +13,7 @@ import {
   ListPlus,
   X,
   Music2,
+  Cloud,
 } from "lucide-react";
 import { Track } from "../types";
 import { Artwork, displayTitle, timeLabel } from "./Artwork";
@@ -22,10 +23,12 @@ interface SongListProps {
   isPlaying: boolean;
   favorites: string[];
   hiResOnlyFilter?: boolean;
+  currentUserId?: string;
+  isAdmin?: boolean;
   onPlayTrack: (track: Track) => void;
   onToggleFavorite: (id: string) => void;
   onEditTrackTags: (track: Track) => void;
-  onDeleteTrack: (id: string) => void;
+  onDeleteTrack: (id: string) => void | Promise<void>;
   onAddToPlaylist: (id: string) => void;
 }
 export function SongList(p: SongListProps) {
@@ -187,6 +190,11 @@ export function SongList(p: SongListProps) {
               <div>
                 <strong>{displayTitle(track)}</strong>
                 <small>{track.artist}</small>
+                {track.storage === "cloud" && (
+                  <span className={`track-source-badge ${track.uploadedBy === p.currentUserId ? "owned" : ""}`}>
+                    <Cloud size={10} /> {track.uploadedBy === p.currentUserId ? "Your upload" : track.audioUrl ? "Cloud stream" : "Sign in to stream"}
+                  </span>
+                )}
               </div>
             </button>
             <span className="track-album">{track.album}</span>
@@ -232,14 +240,16 @@ export function SongList(p: SongListProps) {
                     >
                       <ListPlus size={15} /> Add to playlist
                     </button>
-                    <button
-                      onClick={() => {
-                        p.onEditTrackTags(track);
-                        setMenu(null);
-                      }}
-                    >
-                      <Pencil size={15} /> Edit track details
-                    </button>
+                    {track.storage !== "cloud" && (
+                      <button
+                        onClick={() => {
+                          p.onEditTrackTags(track);
+                          setMenu(null);
+                        }}
+                      >
+                        <Pencil size={15} /> Edit track details
+                      </button>
+                    )}
                     <button
                       onClick={() => {
                         p.onToggleFavorite(track.id);
@@ -249,18 +259,22 @@ export function SongList(p: SongListProps) {
                       <Check size={15} />{" "}
                       {favorite ? "Remove favorite" : "Save to favorites"}
                     </button>
-                    <button
-                      className="danger"
-                      onClick={() => {
-                        if (
-                          confirm(track.sourceUri ? `Remove “${track.title}” from this library? The original file will stay on your device.` : `Remove “${track.title}” from your library?`)
-                        )
-                          p.onDeleteTrack(track.id);
-                        setMenu(null);
-                      }}
-                    >
-                      <Trash2 size={15} /> Remove track
-                    </button>
+                    {(track.storage !== "cloud" || p.isAdmin || (!!p.currentUserId && track.uploadedBy === p.currentUserId)) && (
+                      <button
+                        className="danger"
+                        onClick={() => {
+                          const message = track.storage === "cloud"
+                            ? `Permanently delete “${track.title}” from the cloud library? This removes its B2 audio and Turso metadata.`
+                            : track.sourceUri
+                              ? `Remove “${track.title}” from this library? The original file will stay on your device.`
+                              : `Remove “${track.title}” from your library?`;
+                          if (confirm(message)) void Promise.resolve(p.onDeleteTrack(track.id)).catch(() => {});
+                          setMenu(null);
+                        }}
+                      >
+                        <Trash2 size={15} /> {track.storage === "cloud" ? "Delete cloud track" : "Remove track"}
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -274,7 +288,7 @@ export function SongList(p: SongListProps) {
           {timeLabel(filtered.reduce((n, t) => n + t.duration, 0))} total
         </span>
         <span>
-          <i /> Available offline
+          <i /> {p.tracks.some((track) => track.storage === "cloud") ? "Local + cloud library" : "Available offline"}
         </span>
       </div>
     </div>
