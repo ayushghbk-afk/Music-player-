@@ -2,6 +2,10 @@
 
 Expected project URL: **https://ayushghbk-afk.github.io/Music-player-/** (not live until the deployment succeeds).
 
+## Cloud music API
+
+The static site can use the authenticated cloud library at `https://storage-cloudflare-worker.mr-hackerdon808.workers.dev` without any Pages secrets. The Worker allows the exact `https://ayushghbk-afk.github.io` origin with credentialed CORS. Deploy `worker/` separately before expecting live cloud login/uploads; see `CLOUD_PLATFORM.md` and `worker/README.md`. AI and snapshot-sync companion settings are independent of this cloud music API.
+
 ## One-time repository setup
 
 1. Open [Settings → Pages](https://github.com/ayushghbk-afk/Music-player-/settings/pages).

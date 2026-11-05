@@ -22,6 +22,13 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm test
+      - name: Install cloud Worker dependencies
+        run: npm --prefix worker ci
+      - name: Check and test cloud Worker (no deployment or secrets)
+        run: |
+          npm --prefix worker run check
+          npm --prefix worker test
+          npm --prefix worker run build
       - name: Build static project site (no server or secrets)
         env:
           AETHER_BASE_PATH: /${{ github.event.repository.name }}/

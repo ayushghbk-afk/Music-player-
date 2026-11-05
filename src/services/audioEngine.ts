@@ -171,12 +171,14 @@ export class AudioEngine {
     if (!this.usesNativePlayback()) return;
     this.nativeTracks = new Map(tracks.map((track) => [track.id, track]));
     await AetherPlayer.setQueue({
-      tracks: tracks.map(({ id, title, artist, album, sourceUri }) => ({
+      tracks: tracks.map(({ id, title, artist, album, sourceUri, audioUrl, storage }) => ({
         id,
         title,
         artist,
         album,
         sourceUri,
+        audioUrl: storage === "cloud" ? audioUrl : undefined,
+        cloud: storage === "cloud",
       })),
       shuffle,
       repeat,
@@ -296,14 +298,14 @@ export class AudioEngine {
     };
 
     const remoteUrl = track.sourceUri || audioUrl || track.audioUrl;
-    if (
-      remoteUrl &&
-      (remoteUrl.startsWith("file://") || remoteUrl.startsWith("content://"))
-    ) {
+    const localRemote = remoteUrl && (remoteUrl.startsWith("file://") || remoteUrl.startsWith("content://"));
+    const cloudRemote = track.storage === "cloud" && !!track.cloudId && remoteUrl?.startsWith("https://");
+    if (remoteUrl && (localRemote || cloudRemote)) {
       if (generation !== this.loadGeneration) return;
       await AetherPlayer.playUrl({
         url: remoteUrl,
         trackId: track.id,
+        cloud: track.storage === "cloud",
         ...meta,
       });
       return;
@@ -906,12 +908,15 @@ export class AudioEngine {
         throw new Error(
           "Audio is not present on this device. Re-import the original file.",
         );
-      // Local files only. No remote streaming URL can enter this graph.
+      // Remote audio is accepted only for server-issued cloud track records;
+      // restored/imported metadata cannot turn an arbitrary URL into a source.
+      const cloudStream = track.storage === "cloud" && !!track.cloudId && /^https:\/\//i.test(urlToPlay);
       if (
+        !cloudStream &&
         !/^(blob:|data:audio\/)/.test(urlToPlay) &&
         !/^\/(?![\\/])/.test(urlToPlay)
       )
-        throw new Error("Only local audio is supported.");
+        throw new Error("Only local audio or authenticated cloud streams are supported.");
       await focus;
       await new Promise((resolve) => window.setTimeout(resolve, 12));
       if (generation !== this.loadGeneration) {
@@ -920,7 +925,7 @@ export class AudioEngine {
       }
       const audio = this.ensureAudioElement();
       audio.pause();
-      audio.removeAttribute("crossorigin");
+      audio.crossOrigin = cloudStream ? "anonymous" : null;
       this.startPosition = position;
       this.setAudioSource(urlToPlay);
       ownedUrl = null; // Source owner now manages revocation.

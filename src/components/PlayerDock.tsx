@@ -169,7 +169,7 @@ export function PlayerDock(p: PlayerDockProps) {
           <Maximize2 size={16} />
         </button>
         <span className="output-label">
-          <AudioLines size={12} /> LOCAL AUDIO
+          <AudioLines size={12} /> {p.currentTrack?.storage === "cloud" ? "CLOUD AUDIO" : "LOCAL AUDIO"}
         </span>
       </div>
     </footer>

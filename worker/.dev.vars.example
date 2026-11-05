@@ -1,0 +1,7 @@
+# Copy to .dev.vars for local development only. .dev.vars is Git-ignored.
+# Use real values through your secret manager; never commit or paste them into frontend code.
+TURSO_DATABASE_URL=libsql://your-database-your-org.turso.io
+TURSO_AUTH_TOKEN=replace-locally
+B2_KEY_ID=replace-locally
+B2_APPLICATION_KEY=replace-locally
+AUTH_SECRET=replace-locally-with-a-random-secret-of-at-least-32-bytes

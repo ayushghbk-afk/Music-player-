@@ -118,7 +118,7 @@ export function AlbumsView({
                   <div className="album-browser-art">
                     <Artwork track={list[0]} />
                     <span className="album-corner">
-                      {list.some((t) => t.isHiRes) ? "HI-RES" : "LOCAL AUDIO"}
+                      {list.some((t) => t.isHiRes) ? "HI-RES" : list.some((t) => t.storage === "cloud") ? "CLOUD AUDIO" : "LOCAL AUDIO"}
                     </span>
                     <span className="album-play">
                       <ArrowUpRight size={18} />

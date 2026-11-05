@@ -56,8 +56,13 @@ import { PlaylistsView } from "./components/PlaylistsView";
 import { EqualizerModal } from "./components/EqualizerModal";
 import { BackupSyncCenter } from "./components/BackupSyncCenter";
 import { TrackTagEditor } from "./components/TrackTagEditor";
-import { ImportDropzone } from "./components/ImportDropzone";
+import { ImportDropzone, type ImportMode } from "./components/ImportDropzone";
 import { MobileBottomNav } from "./components/MobileBottomNav";
+import { AuthDialog, type AuthMode } from "./components/AuthDialog";
+import { AccountMenu } from "./components/AccountMenu";
+import { AccountDialog } from "./components/AccountDialog";
+import { AdminDashboard } from "./components/AdminDashboard";
+import { cloudClient, cloudSongToTrack, type CloudSong, type CloudUser } from "./services/cloud";
 import { AiAssistantView } from "./components/AiAssistantView";
 
 const DEFAULT_EQ: EQSettings = {
@@ -143,6 +148,18 @@ async function seedLibrary() {
 }
 export default function App() {
   const [tracks, setTracks] = useState<Track[]>([]);
+  const [cloudUser, setCloudUser] = useState<CloudUser | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [authDialog, setAuthDialog] = useState<{ open: boolean; mode: AuthMode }>({ open: false, mode: "login" });
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [importMode, setImportMode] = useState<ImportMode>("local");
+  const [cloudLoading, setCloudLoading] = useState(false);
+  const [cloudError, setCloudError] = useState("");
+  const [cloudNotice, setCloudNotice] = useState("");
+  const cloudTracksRef = useRef<Track[]>([]);
+  const cloudUserRef = useRef<CloudUser | null>(null);
+  const cloudRequest = useRef(0);
+  const playRequest = useRef(0);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [favorites, setFavorites] = useState<string[]>([]);
 
@@ -194,6 +211,21 @@ export default function App() {
   const persistAt = useRef(0);
   const [showPlaybackSettings, setShowPlaybackSettings] = useState(false);
 
+  const openImport = (mode: ImportMode = "local") => {
+    setImportMode(mode);
+    setIsImportModalOpen(true);
+  };
+  const openAuth = (mode: AuthMode = "login") => setAuthDialog({ open: true, mode });
+  const handleLogout = async () => {
+    try {
+      await cloudClient.logout();
+    } catch {
+      setCloudError("Signed out on this device, but the server could not confirm logout. Refresh the page when your connection returns.");
+    }
+    setAccountOpen(false);
+    setCloudNotice("Signed out. Your local library is still available.");
+  };
+
   useEffect(() => {
     const close = (event: KeyboardEvent) => {
       if (event.key === "Escape") setShowPlaybackSettings(false);
@@ -230,6 +262,14 @@ export default function App() {
       }
       if (showPlaybackSettings) {
         setShowPlaybackSettings(false);
+        return;
+      }
+      if (authDialog.open) {
+        setAuthDialog((current) => ({ ...current, open: false }));
+        return;
+      }
+      if (accountOpen) {
+        setAccountOpen(false);
         return;
       }
       if (editingTrack) {
@@ -274,6 +314,8 @@ export default function App() {
   }, [
     isMobileMoreOpen,
     showPlaybackSettings,
+    authDialog.open,
+    accountOpen,
     currentView,
     editingTrack,
     isEQModalOpen,
@@ -318,13 +360,14 @@ export default function App() {
     try {
       await seedLibrary();
       const existingTracks = await getAllTracks();
+      const availableTracks = [...cloudTracksRef.current, ...existingTracks];
       if (!restored.current) {
         const last = await getKV<{ id: string; position: number } | null>(
           "lastPlayback",
           null,
         );
         if (last) {
-          const track = existingTracks.find((t) => t.id === last.id);
+          const track = availableTracks.find((t) => t.id === last.id);
           if (track) {
             setCurrentTrack(track);
             setCurrentTime(last.position);
@@ -333,7 +376,7 @@ export default function App() {
         }
         const nativeState = await audioEngine.syncNativeState();
         if (nativeState?.trackId) {
-          const playingTrack = existingTracks.find(
+          const playingTrack = availableTracks.find(
             (t) => t.id === nativeState.trackId,
           );
           if (playingTrack) {
@@ -350,10 +393,10 @@ export default function App() {
 
       setTracks((previousTracks) => {
         revokeTrackAudioUrls(previousTracks);
-        return existingTracks;
+        return availableTracks;
       });
 
-      const refreshedCurrent = existingTracks.find(
+      const refreshedCurrent = availableTracks.find(
         (track) => track.id === currentTrackRef.current?.id,
       );
       if (refreshedCurrent) {
@@ -405,6 +448,73 @@ export default function App() {
       setLibraryLoading(false);
     }
   }, []);
+
+  const loadCloudLibrary = useCallback(async (): Promise<Track[]> => {
+    const requestId = ++cloudRequest.current;
+    setCloudLoading(true);
+    try {
+      const songs: CloudSong[] = await cloudClient.listSongs();
+      const cloudTracks = songs.map(cloudSongToTrack);
+      if (requestId === cloudRequest.current) {
+        cloudTracksRef.current = cloudTracks;
+        setTracks((previous) => [...cloudTracks, ...previous.filter((track) => track.storage !== "cloud")]);
+        const selected = currentTrackRef.current;
+        if (selected?.storage === "cloud") {
+          const refreshed = cloudTracks.find((track) => track.id === selected.id);
+          if (refreshed) {
+            currentTrackRef.current = refreshed;
+            setCurrentTrack(refreshed);
+          } else {
+            audioEngine.pause();
+            currentTrackRef.current = null;
+            setCurrentTrack(null);
+            prepared.current = false;
+          }
+        }
+        setCloudError("");
+      }
+      return cloudTracks;
+    } catch (error) {
+      if (requestId === cloudRequest.current) {
+        setCloudError(error instanceof Error ? error.message : "Could not load the cloud library");
+      }
+      return cloudTracksRef.current;
+    } finally {
+      if (requestId === cloudRequest.current) setCloudLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const unsubscribe = cloudClient.subscribe((state) => {
+      if (!active) return;
+      const previous = cloudUserRef.current;
+      cloudUserRef.current = state.user;
+      setCloudUser(state.user);
+      setAuthReady(state.ready);
+      if (previous && !state.user && currentTrackRef.current?.storage === "cloud") {
+        audioEngine.pause();
+        currentTrackRef.current = null;
+        setCurrentTrack(null);
+        prepared.current = false;
+      }
+      if (state.ready) void loadCloudLibrary();
+    });
+    void cloudClient.initialize().catch((error) => {
+      if (active) setCloudError(error instanceof Error ? error.message : "Cloud session restore failed");
+    });
+    return () => { active = false; unsubscribe(); };
+  }, [loadCloudLibrary]);
+
+  useEffect(() => {
+    if (currentView === "admin" && cloudUser?.role !== "admin") setCurrentView("songs");
+  }, [cloudUser, currentView]);
+
+  useEffect(() => {
+    if (!cloudNotice) return;
+    const timer = window.setTimeout(() => setCloudNotice(""), 6000);
+    return () => window.clearTimeout(timer);
+  }, [cloudNotice]);
 
   const refreshAndroidLibrary = useCallback((requestPermission: boolean) => {
     if (scanInFlight.current) return scanInFlight.current;
@@ -458,7 +568,7 @@ export default function App() {
         const rounded = Math.round(duration);
         if (
           !audioEngine.isNative() &&
-          selected &&
+          selected && selected.storage !== "cloud" &&
           rounded > 0 &&
           Math.abs(rounded - selected.duration) > 1 &&
           durationSaved.current.get(selected.id) !== rounded
@@ -495,18 +605,37 @@ export default function App() {
 
   // Handle Play Track
   const handlePlayTrack = async (track: Track) => {
+    const requestId = ++playRequest.current;
     setPlaybackError("");
+    let selected = track;
+    if (track.storage === "cloud") {
+      if (!cloudUser) {
+        setCloudNotice("Sign in to stream cloud music. Local tracks still play without an account.");
+        openAuth("login");
+        return;
+      }
+      if (!track.audioUrl || !track.streamExpiresAt || track.streamExpiresAt < Date.now() + 60000) {
+        const refreshed = await loadCloudLibrary();
+        selected = refreshed.find((candidate) => candidate.id === track.id) || track;
+      }
+      if (requestId !== playRequest.current) return;
+      if (!selected.audioUrl || !selected.streamExpiresAt || selected.streamExpiresAt <= Date.now()) {
+        setPlaybackError("This cloud track needs a fresh stream ticket. Check your connection or sign in again, then retry.");
+        return;
+      }
+    }
+    if (requestId !== playRequest.current) return;
     prepared.current = true;
-    currentTrackRef.current = track;
-    setCurrentTrack(track);
+    currentTrackRef.current = selected;
+    setCurrentTrack(selected);
     setCurrentTime(resumePosition.current);
-    setDuration(track.duration);
+    setDuration(selected.duration);
     audioEngine.setStartPosition(resumePosition.current);
     resumePosition.current = 0;
     // Apply preferences before loading; an older async completion must never restore old settings.
     audioEngine.setVolume(isMuted ? 0 : volume);
     audioEngine.setPlaybackRate(playerSettings.playbackRate);
-    await audioEngine.playTrack(track, track.audioUrl);
+    await audioEngine.playTrack(selected, selected.audioUrl);
   };
 
   const handlePlayPause = () => {
@@ -618,16 +747,35 @@ export default function App() {
 
   // Delete Track
   const handleDeleteTrack = async (trackId: string) => {
-    await deleteTrack(trackId);
-    if (currentTrack?.id === trackId) {
-      audioEngine.pause();
-      setCurrentTrack(null);
+    const track = tracks.find((candidate) => candidate.id === trackId);
+    try {
+      if (track?.storage === "cloud") {
+        if (!cloudUser) { openAuth("login"); return; }
+        await cloudClient.deleteSong(track.cloudId || trackId.replace(/^cloud_/, ""));
+        cloudTracksRef.current = cloudTracksRef.current.filter((candidate) => candidate.id !== trackId);
+        setTracks((previous) => previous.filter((candidate) => candidate.id !== trackId));
+        setCloudNotice(`“${track.title}” was deleted from B2 and Turso.`);
+      } else {
+        await deleteTrack(trackId);
+      }
+      if (currentTrackRef.current?.id === trackId) {
+        audioEngine.pause();
+        currentTrackRef.current = null;
+        setCurrentTrack(null);
+        prepared.current = false;
+      }
+      if (track?.storage === "cloud") await loadCloudLibrary();
+      else await loadLibrary();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not delete track";
+      setCloudError(message);
+      throw error;
     }
-    loadLibrary();
   };
 
   // Save Edit Tags
   const handleSaveTrackTags = async (updated: Track) => {
+    if (updated.storage === "cloud") throw new Error("Cloud track tags are managed at upload time.");
     await saveTrack(updated);
     if (currentTrack?.id === updated.id) {
       currentTrackRef.current = updated;
@@ -705,6 +853,7 @@ export default function App() {
     playlists: "Playlists",
     equalizer: "Studio equalizer",
     backup: "Backup & sync",
+    admin: "Admin dashboard",
     "ai-assistant": "Sound assistant",
   };
 
@@ -724,7 +873,7 @@ export default function App() {
             {libraryLoading
               ? "Preparing your local collection…"
               : playbackStatus === "buffering"
-                ? "Buffering local audio…"
+                ? `Buffering ${currentTrack?.storage === "cloud" ? "cloud" : "local"} audio…`
                 : `Opening ${currentTrack?.title || "audio"}…`}
           </span>
           {!libraryLoading && (
@@ -737,6 +886,12 @@ export default function App() {
           <span>{scanMessage}</span>
           <button onClick={() => setScanMessage("")} aria-label="Dismiss audio access message">Dismiss</button>
         </div>
+      )}
+      {cloudNotice && (
+        <div className="cloud-toast" role="status"><ShieldCheck size={16} /><span>{cloudNotice}</span><button onClick={() => setCloudNotice("")}>Dismiss</button></div>
+      )}
+      {cloudError && (
+        <div className="cloud-api-notice" role="alert"><span>{cloudError}</span><button onClick={() => void loadCloudLibrary()} disabled={cloudLoading}>{cloudLoading ? "Retrying…" : "Retry"}</button><button onClick={() => setCloudError("")}>Dismiss</button></div>
       )}
       {playbackError && (
         <div
@@ -907,7 +1062,8 @@ export default function App() {
             setPlayerSettings(updated);
             setKV("playerSettings", updated);
           }}
-          onTriggerImport={() => setIsImportModalOpen(true)}
+          onTriggerImport={() => openImport("local")}
+          isAdmin={cloudUser?.role === "admin"}
         />
 
         <div className="content-stage">
@@ -928,7 +1084,7 @@ export default function App() {
             </div>
             <div className="header-actions">
               <span className="local-status">
-                <ShieldCheck size={13} /> Local & personal
+                <ShieldCheck size={13} /> {cloudUser ? "Local + cloud" : "Local & personal"}
               </span>
               <span className="header-divider" />
               <button
@@ -968,17 +1124,20 @@ export default function App() {
               <button
                 className="header-import"
                 aria-label="Import music"
-                onClick={() => setIsImportModalOpen(true)}
+                onClick={() => openImport("local")}
               >
                 <ArrowUpFromLine size={14} />
                 <span>Import music</span>
               </button>
-              <span
-                className="profile-avatar"
-                title="Your local listening space"
-              >
-                A
-              </span>
+              <AccountMenu
+                user={cloudUser}
+                ready={authReady}
+                onLogin={() => openAuth("login")}
+                onProfile={() => setAccountOpen(true)}
+                onUpload={() => openImport("cloud")}
+                onAdmin={() => setCurrentView("admin")}
+                onLogout={handleLogout}
+              />
             </div>
           </header>
           <div className="content-columns">
@@ -990,7 +1149,7 @@ export default function App() {
                     onPlay={handlePlayTrack}
                     onViewAlbums={() => setCurrentView("albums")}
                     onViewHiRes={() => setCurrentView("hires")}
-                    onImport={() => setIsImportModalOpen(true)}
+                    onImport={() => openImport("local")}
                   />
                   <div className="section-heading library-heading">
                     <h2>
@@ -1006,6 +1165,8 @@ export default function App() {
                     currentTrackId={currentTrack?.id}
                     isPlaying={isPlaying}
                     favorites={favorites}
+                    currentUserId={cloudUser?.id}
+                    isAdmin={cloudUser?.role === "admin"}
                     onPlayTrack={handlePlayTrack}
                     onToggleFavorite={handleToggleFavorite}
                     onEditTrackTags={setEditingTrack}
@@ -1046,6 +1207,8 @@ export default function App() {
                     isPlaying={isPlaying}
                     favorites={favorites}
                     hiResOnlyFilter={true}
+                    currentUserId={cloudUser?.id}
+                    isAdmin={cloudUser?.role === "admin"}
                     onPlayTrack={handlePlayTrack}
                     onToggleFavorite={handleToggleFavorite}
                     onEditTrackTags={setEditingTrack}
@@ -1111,6 +1274,15 @@ export default function App() {
                     }}
                   />
                 </div>
+              )}
+
+              {currentView === "admin" && cloudUser?.role === "admin" && (
+                <AdminDashboard
+                  currentUser={cloudUser}
+                  tracks={tracks}
+                  onDeleteTrack={handleDeleteTrack}
+                  onRefresh={async () => { await loadCloudLibrary(); }}
+                />
               )}
 
               {currentView === "backup" && (
@@ -1265,15 +1437,33 @@ export default function App() {
       {/* Import Local Files Modal Dropzone */}
       <ImportDropzone
         isOpen={isImportModalOpen}
+        initialMode={importMode}
+        user={cloudUser}
         onClose={() => setIsImportModalOpen(false)}
         onImportComplete={loadLibrary}
+        onRequireAuth={() => { setIsImportModalOpen(false); openAuth("login"); }}
+        onCloudUploadComplete={async () => {
+          await loadCloudLibrary();
+          setCloudNotice("Upload complete. Your track is ready to stream.");
+        }}
+      />
+
+      <AuthDialog isOpen={authDialog.open} initialMode={authDialog.mode} onClose={() => setAuthDialog((current) => ({ ...current, open: false }))} />
+      <AccountDialog
+        isOpen={accountOpen}
+        user={cloudUser}
+        onClose={() => setAccountOpen(false)}
+        onUpload={() => { setAccountOpen(false); openImport("cloud"); }}
+        onAdmin={() => { setAccountOpen(false); setCurrentView("admin"); }}
+        onLogout={handleLogout}
       />
 
       {/* Mobile Sticky Bottom Navigation Bar */}
       <MobileBottomNav
         currentView={currentView}
         onSelectView={setCurrentView}
-        onTriggerImport={() => setIsImportModalOpen(true)}
+        onTriggerImport={() => openImport("local")}
+        isAdmin={cloudUser?.role === "admin"}
         hiResCount={hiResTracks.length}
         totalTrackCount={tracks.length}
         eqEnabled={eqSettings.enabled}

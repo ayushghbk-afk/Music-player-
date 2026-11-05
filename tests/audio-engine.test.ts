@@ -136,6 +136,17 @@ test("remote sources produce a useful error and stop rather than stream", async 
   assert.match(error, /Only local/);
   assert.equal(e.loadedTrackId, null);
 });
+test("authenticated cloud records can stream over HTTPS with CORS enabled", async () => {
+  const e = engine();
+  const cloud = { ...a, id: "cloud_test", cloudId: "test", storage: "cloud" as const };
+  const source = "https://storage-cloudflare-worker.mr-hackerdon808.workers.dev/stream/test?ticket=signed";
+  await e.playTrack(cloud, source);
+  assert.equal(e.loadedTrackId, cloud.id);
+  assert.equal(e.audioElement.src, source);
+  assert.equal(e.audioElement.crossOrigin, "anonymous");
+  assert.equal(e.getStatus(), "playing");
+});
+
 test("playback rate is applied before starting a replacement media source", async () => {
   const e = engine();
   e.setPlaybackRate(1.5);

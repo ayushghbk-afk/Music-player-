@@ -282,7 +282,9 @@ public class MusicPlayerPlugin extends Plugin implements PlaybackManager.Listene
             return;
         }
         Uri uri = Uri.parse(url);
-        if (!"file".equals(uri.getScheme()) && !"content".equals(uri.getScheme())) { call.reject("Only local audio is allowed"); return; }
+        boolean cloud = call.getBoolean("cloud", false);
+        boolean local = "file".equals(uri.getScheme()) || "content".equals(uri.getScheme());
+        if (!local && !(cloud && "https".equals(uri.getScheme()))) { call.reject("Only local audio or authenticated HTTPS cloud streams are allowed"); return; }
         getBridge().executeOnMainThread(() -> {
             playFromUri(uri, call);
             call.resolve(currentState());
@@ -340,8 +342,11 @@ public class MusicPlayerPlugin extends Plugin implements PlaybackManager.Listene
             if (tracks != null) for(int i=0;i<tracks.length();i++) {
                 org.json.JSONObject track=tracks.getJSONObject(i);
                 String source = track.optString("sourceUri", "");
+                boolean cloud = track.optBoolean("cloud", false);
+                if (cloud) source = track.optString("audioUrl", "");
                 Uri uri = Uri.parse(source);
-                if (!"content".equals(uri.getScheme()) || !"media".equals(uri.getAuthority())) {
+                boolean cloudStream = cloud && "https".equals(uri.getScheme());
+                if (!cloudStream && (!"content".equals(uri.getScheme()) || !"media".equals(uri.getAuthority()))) {
                     File file = manager.findStoredTrack(track.getString("id"));
                     if (file == null) continue;
                     uri = Uri.fromFile(file);

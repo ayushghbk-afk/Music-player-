@@ -26,6 +26,7 @@ interface MobileBottomNavProps {
   hiResCount: number;
   totalTrackCount: number;
   eqEnabled?: boolean;
+  isAdmin?: boolean;
   isMoreOpen: boolean;
   onMoreOpenChange: (open: boolean) => void;
   onOpenSettings: () => void;
@@ -156,6 +157,13 @@ export function MobileBottomNav(p: MobileBottomNavProps) {
                 </div>
                 <ChevronRight size={16} />
               </button>
+              {p.isAdmin && (
+                <button onClick={() => go("admin")}>
+                  <ShieldCheck size={20} />
+                  <div><strong>Admin dashboard</strong><small>Users, roles & cloud uploads</small></div>
+                  <ChevronRight size={16} />
+                </button>
+              )}
               <button onClick={() => go("backup")}>
                 <Database size={20} />
                 <div>
