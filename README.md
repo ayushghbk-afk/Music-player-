@@ -2,6 +2,17 @@
 
 Offline-first local music player for Web and Android (`com.aether.audio.player`), with an optional authenticated Turso + private Backblaze B2 cloud library. React 19, TypeScript 5.8, Tailwind 4/Vite 6, Capacitor 8 and Media3 1.5.1. Dependencies are pinned in `package.json` and `package-lock.json`.
 
+## Agent skills
+
+Portable Agent Skills for developing, auditing, and testing Aether live in [`skills/`](skills/README.md) (linked at `.agents/skills/` and `.claude/skills/`, and indexed in [`AGENTS.md`](AGENTS.md)):
+
+- **[`aether-web-design`](skills/aether-web-design/SKILL.md)** — UI/UX architecture, design tokens, responsive layouts, accessibility, and visual QA.
+- **[`aether-audio-dsp`](skills/aether-audio-dsp/SKILL.md)** — Web Audio graph, RBJ/Butterworth EQ, Simple/Extreme Studio, 3-band PEQ rack, metering, visualizers, song themes, and Java DSP parity.
+- **[`aether-android-media3`](skills/aether-android-media3/SKILL.md)** — Capacitor 8 bridge, Media3 `ExoPlayer` / `MediaSessionService`, PCM16 DSP, `LocalTrackServer` / chunked imports, `MediaStore` discovery, and APK CI.
+- **[`aether-cloud-backend`](skills/aether-cloud-backend/SKILL.md)** — Cloudflare Worker (`worker/` — Turso SQL, Backblaze B2 SigV4 Range streaming, scrypt/legacy auth, rotating JWT cookies) and Express `server.ts`.
+- **[`aether-library-lyrics-pwa`](skills/aether-library-lyrics-pwa/SKILL.md)** — `AetherAudioDB` IndexedDB storage, SHA-256 imports, `.aetherjson` backups, LRC/SYLT lyrics reader, dedicated phone UI, and GitHub Pages PWA.
+- **[`aether-testing-and-verification`](skills/aether-testing-and-verification/SKILL.md)** — `node:test` suites, dual-tsconfig checks, multi-target builds, `.e2b.app` live previews, and honest risk reporting.
+
 ## Multi-user cloud library
 
 The existing player now includes real registration/login, rotating sessions, profiles, cloud uploads with progress, private B2 streaming with Range/seek support, owner/admin deletion, and an admin user/role dashboard. Local playback and imports still work without an account. The complete Cloudflare Worker is in `worker/`; see **[CLOUD_PLATFORM.md](CLOUD_PLATFORM.md)** for integration details and **[worker/README.md](worker/README.md)** for deployment, missing-only migrations, legacy password handling, API routes, and secure first-admin promotion. Never put Turso, B2, or JWT secrets in the frontend or GitHub Pages configuration.
