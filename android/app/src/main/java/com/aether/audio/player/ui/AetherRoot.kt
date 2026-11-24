@@ -33,10 +33,13 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.aether.audio.player.model.AppSettings
+import com.aether.audio.player.model.EqSettings
 import com.aether.audio.player.model.Track
 import com.aether.audio.player.ui.components.*
 import com.aether.audio.player.ui.screens.*
 import com.aether.audio.player.ui.theme.AetherColors
+import com.aether.audio.player.ui.theme.paletteFor
 
 private data class NavItem(val route: String, val label: String, val icon: ImageVector, val selectedIcon: ImageVector = icon)
 
@@ -59,6 +62,9 @@ fun AetherRoot(viewModel: MainViewModel) {
     val playerState by viewModel.playerState.collectAsStateWithLifecycle()
     val ui by viewModel.ui.collectAsStateWithLifecycle()
     val filtered by viewModel.filteredTracks.collectAsStateWithLifecycle()
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val eq by viewModel.eq.collectAsStateWithLifecycle()
+    val hiResTracks by viewModel.hiResTracks.collectAsStateWithLifecycle()
 
     var hasAudioPermission by remember { mutableStateOf(hasAudioPermission(context)) }
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -108,16 +114,24 @@ fun AetherRoot(viewModel: MainViewModel) {
     if (showMore) {
         MoreSheet(
             totalTracks = tracks.size,
-            hiResCount = tracks.count { it.mimeType.contains("flac", true) || it.mimeType.contains("wav", true) },
+            hiResCount = tracks.count { it.mimeType.contains("flac", true) || it.mimeType.contains("wav", true) || it.mimeType.contains("alac", true) },
+            currentTheme = settings.theme,
             onDismiss = { showMore = false },
             onScan = { if (hasAudioPermission) viewModel.scan() else permissionLauncher.launch(audioPermissions()) },
-            onOpenSearch = { showMore = false; nav.navigate("search") { launchSingleTop = true } }
+            onOpenSearch = { showMore = false; nav.navigate("search") { launchSingleTop = true } },
+            onOpenHiRes = { showMore = false; nav.navigate("hires") { launchSingleTop = true } },
+            onOpenEq = { showMore = false; nav.navigate("equalizer") { launchSingleTop = true } },
+            onOpenBackup = { showMore = false; nav.navigate("backup") { launchSingleTop = true } },
+            onOpenAssistant = { showMore = false; nav.navigate("assistant") { launchSingleTop = true } },
+            onOpenSettings = { showMore = false; nav.navigate("settings") { launchSingleTop = true } },
+            onSelectTheme = { key -> viewModel.updateSettings { it.copy(theme = key) } },
         )
     }
 
     if (showNowPlaying) {
         NowPlayingScreen(
             state = playerState,
+            lyrics = playerState.currentTrack?.let { viewModel.lyricsFor(it.id) }.orEmpty(),
             onBack = { showNowPlaying = false },
             onPlayPause = { viewModel.player.togglePlayPause() },
             onNext = { viewModel.player.next() },
@@ -126,6 +140,7 @@ fun AetherRoot(viewModel: MainViewModel) {
             onToggleShuffle = { viewModel.player.toggleShuffle() },
             onCycleRepeat = { viewModel.player.cycleRepeatMode() },
             onSeekToIndex = { viewModel.player.seekToIndex(it) },
+            onSaveLyrics = { text -> playerState.currentTrack?.let { viewModel.setLyrics(it.id, text) } },
         )
         return
     }
@@ -288,26 +303,70 @@ fun AetherRoot(viewModel: MainViewModel) {
                     onPlay = { t, q -> viewModel.playTrack(t, q) }
                 )
             }
+            composable("hires") {
+                SimpleCollectionScreen("Hi-res collection", "Every detail in your recordings", hiResTracks, playerState.currentTrack?.id, onBack = { nav.popBackStack() }, onPlay = { t, q -> viewModel.playTrack(t, q) })
+            }
+            composable("equalizer") {
+                EqualizerScreen(eq = eq, onBack = { nav.popBackStack() }, onUpdate = { transform -> viewModel.updateEq(transform) })
+            }
+            composable("backup") {
+                BackupScreen(onBack = { nav.popBackStack() }, onExport = { viewModel.exportBackupJson() }, onImport = { json -> viewModel.importBackupJson(json) })
+            }
+            composable("assistant") {
+                InfoScreen("Sound assistant", "A little guidance, tuned to you.", "Native sound assistant is being wired into this app. For now, use the Equalizer and playback preferences to shape your sound.", onBack = { nav.popBackStack() })
+            }
+            composable("settings") {
+                SettingsScreen(settings = settings, onBack = { nav.popBackStack() }, onUpdate = { t -> viewModel.updateSettings(t) })
+            }
         }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun MoreSheet(totalTracks: Int, hiResCount: Int, onDismiss: () -> Unit, onScan: () -> Unit, onOpenSearch: () -> Unit) {
+private fun MoreSheet(
+    totalTracks: Int, hiResCount: Int, currentTheme: String,
+    onDismiss: () -> Unit, onScan: () -> Unit, onOpenSearch: () -> Unit,
+    onOpenHiRes: () -> Unit, onOpenEq: () -> Unit, onOpenBackup: () -> Unit,
+    onOpenAssistant: () -> Unit, onOpenSettings: () -> Unit, onSelectTheme: (String) -> Unit,
+) {
+    val themes = listOf("obsidian" to "Copper", "sapphire" to "Sapphire", "cyberpunk" to "Rose", "studio-gold" to "Gold", "slate" to "Sage")
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = AetherColors.Surface) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
-            Text("MAKE IT YOURS", style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.6.sp), color = AetherColors.Muted2)
-            Spacer(Modifier.height(4.dp))
-            Text("Your listening space.", style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.SemiBold), color = AetherColors.Text)
-            Spacer(Modifier.height(16.dp))
-            MoreRow(Icons.Default.Refresh, "Scan library", "Find music on this device", onScan)
-            MoreRow(Icons.Default.Search, "Search", "Find songs, artists, albums", onOpenSearch)
-            MoreRow(Icons.Default.HighQuality, "Hi-res collection", "$hiResCount high quality files detected") {}
-            MoreRow(Icons.Default.GraphicEq, "Sound studio", "Native playback is active") {}
-            Spacer(Modifier.height(8.dp))
-            Text("$totalTracks tracks on this device. Your music stays yours.", style = MaterialTheme.typography.bodySmall, color = AetherColors.Muted2)
-            Spacer(Modifier.height(24.dp))
+        LazyColumn(Modifier.fillMaxWidth().padding(horizontal = 20.dp), contentPadding = PaddingValues(bottom = 28.dp)) {
+            item {
+                Text("MAKE IT YOURS", style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.6.sp), color = AetherColors.Muted2)
+                Spacer(Modifier.height(4.dp))
+                Text("Your listening space.", style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.SemiBold), color = AetherColors.Text)
+                Spacer(Modifier.height(16.dp))
+            }
+            item { MoreRow(Icons.Default.Refresh, "Scan library", "Find music on this device", onScan) }
+            item { MoreRow(Icons.Default.Search, "Search", "Find songs, artists, albums", onOpenSearch) }
+            item { MoreRow(Icons.Default.HighQuality, "Hi-res collection", "$hiResCount high quality files detected", onOpenHiRes) }
+            item { MoreRow(Icons.Default.AutoAwesome, "Sound assistant", "A little guidance, tuned to you", onOpenAssistant) }
+            item { MoreRow(Icons.Default.GraphicEq, "Equalizer", "Shape your sound", onOpenEq) }
+            item { MoreRow(Icons.Default.Backup, "Backup & sync", "Export/import your library metadata", onOpenBackup) }
+            item { MoreRow(Icons.Default.Settings, "Playback preferences", "Speed, autoplay & listening options", onOpenSettings) }
+            item {
+                Spacer(Modifier.height(12.dp))
+                Text("SET THE MOOD", style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.4.sp), color = AetherColors.Muted2)
+                Spacer(Modifier.height(10.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    themes.forEach { (key, label) ->
+                        val selected = currentTheme == key
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { onSelectTheme(key) }.padding(4.dp)) {
+                            Box(
+                                Modifier.size(42.dp).clip(CircleShape).background(paletteFor(key).accent.copy(alpha = 0.25f))
+                                    .then(if (selected) Modifier.background(paletteFor(key).accent.copy(alpha = 0.35f)) else Modifier),
+                                contentAlignment = Alignment.Center
+                            ) { Box(Modifier.size(18.dp).clip(CircleShape).background(paletteFor(key).accent)) }
+                            Spacer(Modifier.height(4.dp))
+                            Text(label, style = MaterialTheme.typography.labelSmall, color = if (selected) AetherColors.Accent else AetherColors.Muted)
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                Text("$totalTracks tracks on this device. Your music stays yours.", style = MaterialTheme.typography.bodySmall, color = AetherColors.Muted2)
+            }
         }
     }
 }
@@ -315,7 +374,7 @@ private fun MoreSheet(totalTracks: Int, hiResCount: Int, onDismiss: () -> Unit, 
 @Composable
 private fun MoreRow(icon: ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick).padding(vertical = 12.dp),
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick).padding(vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(Modifier.size(40.dp).background(AetherColors.Accent.copy(alpha = 0.1f), RoundedCornerShape(10.dp)), contentAlignment = Alignment.Center) {
@@ -333,42 +392,149 @@ private fun MoreRow(icon: ImageVector, title: String, subtitle: String, onClick:
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SearchScreen(
-    query: String,
-    tracks: List<Track>,
-    currentTrackId: Long?,
-    onQueryChange: (String) -> Unit,
-    onPlay: (Track, List<Track>) -> Unit,
-    onBack: () -> Unit,
+    query: String, tracks: List<Track>, currentTrackId: Long?,
+    onQueryChange: (String) -> Unit, onPlay: (Track, List<Track>) -> Unit, onBack: () -> Unit,
 ) {
     Column(Modifier.fillMaxSize().background(AetherColors.Background)) {
-        TopAppBar(
-            colors = TopAppBarDefaults.topAppBarColors(containerColor = AetherColors.Background),
+        TopAppBar(colors = TopAppBarDefaults.topAppBarColors(containerColor = AetherColors.Background),
             title = { Text("Search", color = AetherColors.Text) },
-            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back", tint = AetherColors.Text) } }
-        )
+            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back", tint = AetherColors.Text) } })
         OutlinedTextField(
-            value = query,
-            onValueChange = onQueryChange,
+            value = query, onValueChange = onQueryChange,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             placeholder = { Text("Search your library", color = AetherColors.Muted2) },
-            leadingIcon = { Icon(Icons.Default.Search, null, tint = AetherColors.Muted) },
-            singleLine = true,
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = AetherColors.Accent, unfocusedBorderColor = AetherColors.LineStrong,
-                focusedTextColor = AetherColors.Text, unfocusedTextColor = AetherColors.Text,
-                cursorColor = AetherColors.Accent
-            )
+            leadingIcon = { Icon(Icons.Default.Search, null, tint = AetherColors.Muted) }, singleLine = true,
+            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = AetherColors.Accent, unfocusedBorderColor = AetherColors.LineStrong, focusedTextColor = AetherColors.Text, unfocusedTextColor = AetherColors.Text, cursorColor = AetherColors.Accent)
         )
-        if (query.isBlank()) {
-            EmptyState("Search your library", "Type to find songs, artists, and albums.")
-        } else if (tracks.isEmpty()) {
-            EmptyState("No matches. Keep exploring.", "Try another title, album, or artist.")
-        } else {
-            LazyColumn(contentPadding = PaddingValues(bottom = 140.dp, start = 8.dp, end = 8.dp)) {
-                items(tracks, key = { it.id }) { track ->
-                    TrackRow(track = track, isActive = track.id == currentTrackId, isPlaying = track.id == currentTrackId, onClick = { onPlay(track, tracks) })
+        if (query.isBlank()) EmptyState("Search your library", "Type to find songs, artists, and albums.")
+        else if (tracks.isEmpty()) EmptyState("No matches. Keep exploring.", "Try another title, album, or artist.")
+        else LazyColumn(contentPadding = PaddingValues(bottom = 140.dp, start = 8.dp, end = 8.dp)) {
+            items(tracks, key = { it.id }) { track -> TrackRow(track = track, isActive = track.id == currentTrackId, isPlaying = track.id == currentTrackId, onClick = { onPlay(track, tracks) }) }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SimpleCollectionScreen(title: String, subtitle: String, tracks: List<Track>, currentTrackId: Long?, onBack: () -> Unit, onPlay: (Track, List<Track>) -> Unit) {
+    Scaffold(containerColor = AetherColors.Background, topBar = {
+        TopAppBar(colors = TopAppBarDefaults.topAppBarColors(containerColor = AetherColors.Background),
+            title = { Column { Text(title, color = AetherColors.Text); Text(subtitle, style = MaterialTheme.typography.bodySmall, color = AetherColors.Muted) } },
+            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back", tint = AetherColors.Text) } })
+    }) { padding ->
+        LazyColumn(Modifier.padding(padding).fillMaxSize().background(AetherColors.Background), contentPadding = PaddingValues(bottom = 140.dp, start = 8.dp, end = 8.dp, top = 8.dp)) {
+            if (tracks.isEmpty()) item { EmptyState("Nothing here yet", "Your matching tracks will appear here.") }
+            else items(tracks, key = { it.id }) { track -> TrackRow(track = track, isActive = track.id == currentTrackId, isPlaying = track.id == currentTrackId, onClick = { onPlay(track, tracks) }) }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun EqualizerScreen(eq: EqSettings, onBack: () -> Unit, onUpdate: ((EqSettings) -> EqSettings) -> Unit) {
+    val labels = listOf("32", "64", "125", "250", "500", "1k", "2k", "4k", "8k", "16k")
+    Scaffold(containerColor = AetherColors.Background, topBar = {
+        TopAppBar(colors = TopAppBarDefaults.topAppBarColors(containerColor = AetherColors.Background),
+            title = { Text("Equalizer", color = AetherColors.Text) },
+            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back", tint = AetherColors.Text) } })
+    }) { padding ->
+        LazyColumn(Modifier.padding(padding).fillMaxSize().background(AetherColors.Background).padding(16.dp), contentPadding = PaddingValues(bottom = 120.dp)) {
+            item {
+                Text("YOUR STUDIO", style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.6.sp), color = AetherColors.Muted2)
+                Spacer(Modifier.height(6.dp))
+                Text("Shape your sound", style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.SemiBold), color = AetherColors.Text)
+                Spacer(Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("EQ enabled", color = AetherColors.Text, modifier = Modifier.weight(1f))
+                    Switch(checked = eq.enabled, onCheckedChange = { v -> onUpdate { it.copy(enabled = v) } })
                 }
+                Spacer(Modifier.height(12.dp))
             }
+            items(eq.bands.size) { i ->
+                val v = eq.bands.getOrElse(i) { 0f }
+                Text("${labels.getOrElse(i) { "Band" }} Hz: ${"%.1f".format(v)} dB", color = AetherColors.Muted, style = MaterialTheme.typography.bodySmall)
+                Slider(value = v, onValueChange = { nv -> onUpdate { s -> s.copy(bands = s.bands.toMutableList().also { b -> if (i < b.size) b[i] = nv }) } }, valueRange = -12f..12f,
+                    colors = SliderDefaults.colors(thumbColor = AetherColors.Accent, activeTrackColor = AetherColors.Accent))
+            }
+            item {
+                Spacer(Modifier.height(8.dp))
+                Text("Preamp: ${"%.1f".format(eq.preamp)} dB", color = AetherColors.Muted, style = MaterialTheme.typography.bodySmall)
+                Slider(value = eq.preamp, onValueChange = { nv -> onUpdate { it.copy(preamp = nv) } }, valueRange = -12f..12f,
+                    colors = SliderDefaults.colors(thumbColor = AetherColors.Accent, activeTrackColor = AetherColors.Accent))
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BackupScreen(onBack: () -> Unit, onExport: () -> String, onImport: (String) -> Result<Unit>) {
+    val context = LocalContext.current
+    var status by remember { mutableStateOf("") }
+    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null) runCatching {
+            context.contentResolver.openOutputStream(uri)?.use { it.write(onExport().toByteArray()) }
+            status = "Backup exported."
+        }.onFailure { status = "Export failed: ${it.message}" }
+    }
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) runCatching {
+            val json = context.contentResolver.openInputStream(uri)?.bufferedReader()?.readText().orEmpty()
+            onImport(json).getOrThrow()
+            status = "Backup imported."
+        }.onFailure { status = "Import failed: ${it.message}" }
+    }
+    Scaffold(containerColor = AetherColors.Background, topBar = {
+        TopAppBar(colors = TopAppBarDefaults.topAppBarColors(containerColor = AetherColors.Background),
+            title = { Text("Backup & sync", color = AetherColors.Text) },
+            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back", tint = AetherColors.Text) } })
+    }) { padding ->
+        Column(Modifier.padding(padding).fillMaxSize().background(AetherColors.Background).padding(20.dp)) {
+            Text("Keep your collection close", color = AetherColors.Muted)
+            Spacer(Modifier.height(16.dp))
+            Button(onClick = { exportLauncher.launch("aether-backup.json") }, colors = ButtonDefaults.buttonColors(containerColor = AetherColors.Accent, contentColor = Color(0xFF1A120D))) { Text("Export backup JSON") }
+            Spacer(Modifier.height(10.dp))
+            OutlinedButton(onClick = { importLauncher.launch(arrayOf("application/json", "text/*")) }) { Text("Import backup JSON") }
+            if (status.isNotBlank()) { Spacer(Modifier.height(12.dp)); Text(status, color = AetherColors.Muted) }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SettingsScreen(settings: AppSettings, onBack: () -> Unit, onUpdate: ((AppSettings) -> AppSettings) -> Unit) {
+    Scaffold(containerColor = AetherColors.Background, topBar = {
+        TopAppBar(colors = TopAppBarDefaults.topAppBarColors(containerColor = AetherColors.Background),
+            title = { Text("Playback preferences", color = AetherColors.Text) },
+            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back", tint = AetherColors.Text) } })
+    }) { padding ->
+        Column(Modifier.padding(padding).fillMaxSize().background(AetherColors.Background).padding(20.dp)) {
+            SettingToggle("Autoplay next track", settings.autoPlayNext) { v -> onUpdate { it.copy(autoPlayNext = v) } }
+            SettingToggle("Gapless playback", settings.gapless) { v -> onUpdate { it.copy(gapless = v) } }
+        }
+    }
+}
+
+@Composable
+private fun SettingToggle(title: String, checked: Boolean, onChecked: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(title, color = AetherColors.Text, modifier = Modifier.weight(1f))
+        Switch(checked = checked, onCheckedChange = onChecked)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun InfoScreen(title: String, eyebrow: String, body: String, onBack: () -> Unit) {
+    Scaffold(containerColor = AetherColors.Background, topBar = {
+        TopAppBar(colors = TopAppBarDefaults.topAppBarColors(containerColor = AetherColors.Background),
+            title = { Text(title, color = AetherColors.Text) },
+            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back", tint = AetherColors.Text) } })
+    }) { padding ->
+        Column(Modifier.padding(padding).fillMaxSize().background(AetherColors.Background).padding(20.dp)) {
+            Text(eyebrow.uppercase(), style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.6.sp), color = AetherColors.Muted2)
+            Spacer(Modifier.height(8.dp))
+            Text(body, color = AetherColors.Muted, style = MaterialTheme.typography.bodyLarge)
         }
     }
 }
@@ -380,15 +546,7 @@ private fun StudioScreen() {
         Spacer(Modifier.height(6.dp))
         Text("Sound studio", style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.SemiBold), color = AetherColors.Text)
         Spacer(Modifier.height(8.dp))
-        Text("Native playback is active. Advanced EQ/studio controls are coming to the native UI in the next pass.", color = AetherColors.Muted)
-        Spacer(Modifier.height(20.dp))
-        Surface(color = AetherColors.Surface, shape = RoundedCornerShape(16.dp), border = androidx.compose.foundation.BorderStroke(1.dp, AetherColors.Line)) {
-            Column(Modifier.padding(16.dp)) {
-                Text("Native audio engine", color = AetherColors.Text, fontWeight = FontWeight.Medium)
-                Spacer(Modifier.height(4.dp))
-                Text("Playback uses Media3/ExoPlayer on device — no WebView audio.", color = AetherColors.Muted, style = MaterialTheme.typography.bodySmall)
-            }
-        }
+        Text("Native playback is active through Media3/ExoPlayer. Open Equalizer from More to shape your sound.", color = AetherColors.Muted)
     }
 }
 
