@@ -9,19 +9,33 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
+object AetherColors {
+    val Background = Color(0xFF111214)
+    val Surface = Color(0xFF18191C)
+    val Surface2 = Color(0xFF151618)
+    val Surface3 = Color(0xFF1E1F23)
+    val Accent = Color(0xFFE5A68C)
+    val AccentDim = Color(0x26E5A68C)
+    val Text = Color(0xFFEDEDEE)
+    val Muted = Color(0xFF83848C)
+    val Muted2 = Color(0xFF696A72)
+    val Line = Color(0x14FFFFFF)
+    val LineStrong = Color(0x26FFFFFF)
+}
+
 private val AetherDarkScheme = darkColorScheme(
-    primary = Color(0xFFD4A574),
-    onPrimary = Color(0xFF1A1208),
-    primaryContainer = Color(0xFF3A2A18),
-    onPrimaryContainer = Color(0xFFF3DFC8),
+    primary = AetherColors.Accent,
+    onPrimary = Color(0xFF1A120D),
+    primaryContainer = Color(0xFF3A2820),
+    onPrimaryContainer = Color(0xFFF6E1D7),
     secondary = Color(0xFFCCBCA8),
     onSecondary = Color(0xFF1F1A14),
-    background = Color(0xFF0B0B0B),
-    onBackground = Color(0xFFF3EFE8),
-    surface = Color(0xFF141414),
-    onSurface = Color(0xFFF3EFE8),
-    surfaceVariant = Color(0xFF1E1B18),
-    onSurfaceVariant = Color(0xFFD2C8BC),
+    background = AetherColors.Background,
+    onBackground = AetherColors.Text,
+    surface = AetherColors.Surface,
+    onSurface = AetherColors.Text,
+    surfaceVariant = AetherColors.Surface3,
+    onSurfaceVariant = AetherColors.Muted,
     outline = Color(0xFF5A5248),
     error = Color(0xFFFFB4AB),
     onError = Color(0xFF690005),
@@ -33,8 +47,8 @@ fun AetherTheme(content: @Composable () -> Unit) {
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
-            window.statusBarColor = Color(0xFF0B0B0B).toArgb()
-            window.navigationBarColor = Color(0xFF0B0B0B).toArgb()
+            window.statusBarColor = AetherColors.Background.toArgb()
+            window.navigationBarColor = AetherColors.Background.toArgb()
             WindowCompat.getInsetsController(window, view).apply {
                 isAppearanceLightStatusBars = false
                 isAppearanceLightNavigationBars = false
